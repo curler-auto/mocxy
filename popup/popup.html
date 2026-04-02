@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=360">
+  <title>Mocxy</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-title">
+      <img src="../icons/icon-32.png" alt="" class="header-icon" width="20" height="20">
+      <span>Mocxy</span>
+    </div>
+    <label class="toggle" id="masterToggle">
+      <input type="checkbox" id="toggleInput">
+      <span class="toggle-slider"></span>
+    </label>
+  </header>
+
+  <!-- Stats Row -->
+  <div class="stats-row">
+    <div class="stat">
+      <span class="stat-value" id="activeRulesCount">0</span>
+      <span class="stat-label">rules active</span>
+    </div>
+    <div class="stat-divider"></div>
+    <div class="stat">
+      <span class="stat-value" id="interceptedCount">0</span>
+      <span class="stat-label">intercepted</span>
+    </div>
+  </div>
+
+  <!-- Recent Intercepts -->
+  <div class="section-label">Recent Intercepts</div>
+  <ul class="request-list" id="requestList">
+    <li class="request-empty" id="emptyState">No recent intercepts</li>
+  </ul>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <a href="#" id="optionsLink" class="footer-link">Options</a>
+    <a href="#" id="clearLogsLink" class="footer-link">Clear Logs</a>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
