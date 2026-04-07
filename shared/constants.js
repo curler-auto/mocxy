@@ -7,11 +7,18 @@ export const EXTENSION_NAME = 'Mocxy';
 
 /** Keys used for chrome.storage.local persistence. */
 export const STORAGE_KEYS = {
-  RULES: 'mocxy_rules',
-  MOCK_COLLECTIONS: 'mocxy_mock_collections',
-  SETTINGS: 'mocxy_settings',
+  RULES:               'mocxy_rules',
+  MOCK_COLLECTIONS:    'mocxy_mock_collections',
+  SETTINGS:            'mocxy_settings',
   INTERCEPTOR_ENABLED: 'mocxy_enabled',
+  MOCK_SERVER_URL:     'mocxy_mock_server_url',
 };
+
+/** Default mock server URL. */
+export const DEFAULT_MOCK_SERVER_URL = 'http://localhost:5000';
+
+/** Admin API path prefix on the mock server. */
+export const MOCK_SERVER_ADMIN_PATH = '/mocxy/admin';
 
 /** IndexedDB database name. */
 export const IDB_NAME = 'MocxyDB';

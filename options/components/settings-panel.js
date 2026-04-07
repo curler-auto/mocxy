@@ -4,7 +4,7 @@
  * configuration, and a full reset option.
  */
 
-import { MSG_TYPES, DEFAULT_SETTINGS } from '../../shared/constants.js';
+import { MSG_TYPES, DEFAULT_SETTINGS, DEFAULT_MOCK_SERVER_URL, STORAGE_KEYS } from '../../shared/constants.js';
 
 /* -------------------------------------------------------------------------- */
 /*  Constants                                                                  */
@@ -165,6 +165,36 @@ export function initSettingsPanel(container) {
 
       <div class="sp-reset-area">
         <button class="btn btn-danger" id="resetAllBtn">Reset All Settings</button>
+      </div>
+    </div>
+
+    <!-- ============================================================= -->
+    <!--  Mock Server Section                                          -->
+    <!-- ============================================================= -->
+    <div class="sp-section">
+      <h3 class="sp-section-title">Mock Server</h3>
+      <p class="sp-description">
+        Connect to a running Mocxy mock server to manage mocks from the extension.
+        Start the server: <code style="background:var(--c-surface2);padding:1px 6px;border-radius:3px;font-size:11px">cd mock-server &amp;&amp; npm start</code>
+      </p>
+
+      <div class="sp-field">
+        <label class="sp-label" for="mockServerUrl">Server URL</label>
+        <div style="display:flex;gap:8px;align-items:center;flex:1">
+          <input
+            type="text"
+            class="input sp-mock-server-input"
+            id="mockServerUrl"
+            placeholder="http://localhost:5000"
+            value=""
+          >
+          <button class="btn btn-secondary sp-test-btn" id="testConnectionBtn">Test</button>
+        </div>
+      </div>
+
+      <div class="sp-field" id="connectionStatusRow" style="display:none">
+        <label class="sp-label"></label>
+        <span id="connectionStatus" class="sp-connection-status"></span>
       </div>
     </div>
 
@@ -364,6 +394,60 @@ export function initSettingsPanel(container) {
       }
     }
   });
+
+  // ---------------------------------------------------------------------- //
+  //  Mock Server connection                                                //
+  // ---------------------------------------------------------------------- //
+
+  const $mockServerUrl    = container.querySelector('#mockServerUrl');
+  const $testConnectionBtn = container.querySelector('#testConnectionBtn');
+  const $connectionStatus  = container.querySelector('#connectionStatus');
+  const $connectionStatusRow = container.querySelector('#connectionStatusRow');
+
+  // Load saved server URL
+  chrome.storage.local.get(STORAGE_KEYS.MOCK_SERVER_URL, (r) => {
+    if ($mockServerUrl) {
+      $mockServerUrl.value = r[STORAGE_KEYS.MOCK_SERVER_URL] || DEFAULT_MOCK_SERVER_URL;
+    }
+  });
+
+  // Save on change
+  if ($mockServerUrl) {
+    $mockServerUrl.addEventListener('change', () => {
+      chrome.storage.local.set({ [STORAGE_KEYS.MOCK_SERVER_URL]: $mockServerUrl.value.trim() });
+    });
+  }
+
+  // Test connection
+  if ($testConnectionBtn) {
+    $testConnectionBtn.addEventListener('click', async () => {
+      const url = ($mockServerUrl?.value || '').trim();
+      if (!url) return;
+      $testConnectionBtn.disabled = true;
+      $testConnectionBtn.textContent = '…';
+      $connectionStatusRow.style.display = 'flex';
+      $connectionStatus.textContent = 'Connecting…';
+      $connectionStatus.style.color = 'var(--c-muted)';
+      try {
+        const res  = await fetch(`${url}/mocxy/admin/health`, { signal: AbortSignal.timeout(4000) });
+        const data = await res.json();
+        $connectionStatus.innerHTML =
+          `<span style="color:var(--c-success)">● Connected</span>` +
+          `&nbsp;&nbsp;v${data.version} &middot; ${data.mocks} mock${data.mocks !== 1 ? 's' : ''}` +
+          ` &middot; uptime ${Math.floor((data.uptime || 0) / 60)}m`;
+        // Also persist URL if connection succeeded
+        chrome.storage.local.set({ [STORAGE_KEYS.MOCK_SERVER_URL]: url });
+      } catch (err) {
+        const reason = err.name === 'TimeoutError' ? 'Connection timed out' : 'Server not running';
+        $connectionStatus.innerHTML =
+          `<span style="color:var(--c-error)">● Offline</span>` +
+          `&nbsp;&nbsp;${reason}`;
+      } finally {
+        $testConnectionBtn.disabled = false;
+        $testConnectionBtn.textContent = 'Test';
+      }
+    });
+  }
 
   // ---------------------------------------------------------------------- //
   //  Initialise                                                             //
