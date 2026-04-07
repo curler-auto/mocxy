@@ -80,6 +80,47 @@ async function deleteMock(id) {
   return serverFetch(`/mocks/${id}`, { method: 'DELETE' });
 }
 
+/**
+ * Called whenever a server call fails.
+ * Immediately rechecks the connection and refreshes the status bar
+ * so the user sees "● Offline" right away instead of waiting 30s.
+ */
+async function handleServerError(err) {
+  const isNetworkErr = err.name === 'TypeError' || err.name === 'AbortError'
+    || err.message.toLowerCase().includes('fetch')
+    || err.message.toLowerCase().includes('network')
+    || err.message.toLowerCase().includes('failed');
+  if (isNetworkErr) {
+    await checkConnection();
+    updateStatusBar();
+  }
+  return err.message;
+}
+
+/** Show an inline error below the form (auto-dismisses after 5s). */
+function showFormError(msg) {
+  const old = _container?.querySelector('.me-form-error');
+  if (old) old.remove();
+  const div = document.createElement('div');
+  div.className = 'me-form-error';
+  div.innerHTML = `<span>⚠ ${msg}</span>`;
+  const footer = _container?.querySelector('.me-form-actions');
+  if (footer) footer.before(div);
+  setTimeout(() => div.remove(), 5000);
+}
+
+/** Show an inline error in the left panel (for delete failures). */
+function showListError(msg) {
+  const old = _container?.querySelector('.me-list-error');
+  if (old) old.remove();
+  const div = document.createElement('div');
+  div.className = 'me-list-error';
+  div.innerHTML = `<span>⚠ ${msg}</span>`;
+  const list = _container?.querySelector('.me-mock-list');
+  if (list) list.before(div);
+  setTimeout(() => div.remove(), 5000);
+}
+
 /* -------------------------------------------------------------------------- */
 /*  DOM helper                                                                */
 /* -------------------------------------------------------------------------- */
@@ -185,6 +226,7 @@ function updateStatusBar() {
     textContent: '↻ Refresh',
     onClick: async () => {
       refreshBtn.disabled = true;
+      refreshBtn.textContent = '↻ …';
       _serverUrl = await getMockServerUrl();
       await checkConnection();
       if (_serverStatus === 'connected') await loadMocks();
@@ -253,7 +295,10 @@ function renderMockList() {
           if (_selectedId === mock.id) _selectedId = null;
           await loadMocks();
           render();
-        } catch (err) { alert('Delete failed: ' + err.message); }
+        } catch (err) {
+          const msg = await handleServerError(err);
+          showListError(`Delete failed: ${msg}`);
+        }
       },
     }));
 
@@ -499,9 +544,19 @@ function buildMockForm(mock) {
   footer.appendChild(el('button',{type:'button',className:'me-btn me-btn-primary',textContent:'Save Mock',
     onClick: async () => {
       rebuildRespHdrs();
-      if (!draft.name) { alert('Please enter a mock name.'); return; }
-      try { const saved = await saveMock(draft); _selectedId=saved.id; await loadMocks(); render(); }
-      catch(err) { alert('Save failed: '+err.message); }
+      if (!draft.name) { showFormError('Please enter a mock name.'); return; }
+      const saveBtn = form.querySelector('.me-btn-primary');
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+      try {
+        const saved = await saveMock(draft);
+        _selectedId = saved.id;
+        await loadMocks();
+        render();
+      } catch (err) {
+        const msg = await handleServerError(err);
+        showFormError(`Save failed: ${msg}`);
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Mock'; }
+      }
     },
   }));
   form.appendChild(footer);
@@ -672,6 +727,9 @@ function injectStyles() {
 .me-icon-btn-danger:hover { color:var(--c-error); }
 .me-hidden-file-input { display:none; }
 .me-form-actions { display:flex;justify-content:flex-end;gap:8px;padding-top:14px;margin-top:auto;border-top:1px solid var(--c-border); }
+.me-form-error,.me-list-error { padding:8px 12px;background:rgba(244,112,103,.1);border:1px solid var(--c-error);border-radius:4px;color:var(--c-error);font-size:12px;animation:meErrIn .2s ease; }
+.me-list-error { margin:0 0 4px; }
+@keyframes meErrIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:translateY(0)} }
 `;
   document.head.appendChild(style);
 }

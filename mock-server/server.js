@@ -12,10 +12,17 @@
 
 import express from 'express';
 import cors from 'cors';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import {
-  load, getAll, getById, create, update, remove, removeAll, importAll,
+  load, getAll, getById, create, update, remove, removeAll, importAll, reload,
 } from './store.js';
 import { findMatch } from './matcher.js';
+import {
+  loadConfig, saveConfig, getConfig, setApiKey, chat, extractStubs,
+} from './ai.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app     = express();
 const PORT    = parseInt(process.env.PORT || '5000', 10);
@@ -154,6 +161,17 @@ admin.patch('/mocks/:id/toggle', async (req, res) => {
 
 // ── Reset stats ─────────────────────────────────────────────────────────────
 
+// Hot-reload stubs from disk without restarting
+admin.post('/reload', async (_req, res) => {
+  try {
+    const mocks = await reload();
+    console.log(`  [reload] Reloaded ${mocks.length} stub(s) from stubs/`);
+    res.json({ reloaded: mocks.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 admin.post('/mocks/:id/reset-stats', async (req, res) => {
   const mock = getById(req.params.id);
   if (!mock) return res.status(404).json({ error: 'Mock not found' });
@@ -177,6 +195,72 @@ admin.delete('/mocks', async (_req, res) => {
 });
 
 app.use('/mocxy/admin', admin);
+
+// ── AI API  (/mocxy/ai/*) ─────────────────────────────────────────────────
+
+const ai = express.Router();
+
+// Get AI config (key is masked)
+ai.get('/config', (_req, res) => {
+  res.json(getConfig());
+});
+
+// Save AI config
+ai.put('/config', async (req, res) => {
+  try {
+    const cfg = req.body || {};
+    // If key sent as masked placeholder, keep the existing key
+    if (cfg.apiKey && cfg.apiKey.startsWith('••••')) delete cfg.apiKey;
+    const saved = await saveConfig(cfg);
+    res.json({ ...saved, apiKey: saved.apiKey ? '••••' + saved.apiKey.slice(-4) : '' });
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Chat — main AI endpoint
+ai.post('/chat', async (req, res) => {
+  const { messages } = req.body || {};
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: 'messages array is required' });
+  }
+  try {
+    const reply  = await chat(messages);
+    const stubs  = extractStubs(reply);
+    res.json({ reply, stubs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Quick-generate — shorthand: just a prompt, returns stubs + message
+ai.post('/generate', async (req, res) => {
+  const { prompt } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: 'prompt is required' });
+  try {
+    const reply = await chat([{ role: 'user', content: prompt }]);
+    const stubs = extractStubs(reply);
+    res.json({ reply, stubs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Analyze all mocks
+ai.post('/analyze', async (_req, res) => {
+  try {
+    const reply = await chat([{
+      role: 'user',
+      content: 'Analyze all current mocks. Identify: duplicates, conflicting URL patterns, missing edge cases (4xx/5xx), and any configuration issues. Give bullet-point recommendations.',
+    }]);
+    res.json({ reply });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.use('/mocxy/ai', ai);
+
+// ── Standalone UI  (/mocxy-ui) ────────────────────────────────────────────
+app.use('/mocxy-ui', express.static(join(__dirname, 'ui')));
 
 /* -------------------------------------------------------------------------- */
 /*  Request matching — everything else                                        */
@@ -248,6 +332,7 @@ app.all('*', async (req, res) => {
 /* -------------------------------------------------------------------------- */
 
 await load();
+await loadConfig();
 
 app.listen(PORT, () => {
   console.log(`

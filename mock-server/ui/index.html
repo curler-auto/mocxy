@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mocxy Mock Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ── Top bar ──────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0090f0" stroke-width="2.5" stroke-linecap="round">
+        <circle cx="12" cy="12" r="3"/>
+        <line x1="2" y1="12" x2="9" y2="12"/>
+        <line x1="15" y1="12" x2="22" y2="12"/>
+        <polyline points="6 8 2 12 6 16"/>
+        <polyline points="18 8 22 12 18 16"/>
+      </svg>
+      <span class="topbar-name">Mocxy</span>
+      <span class="topbar-sub">Mock Server</span>
+    </div>
+
+    <div class="topbar-status" id="topbarStatus">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Connecting…</span>
+    </div>
+
+    <div class="topbar-actions">
+      <button class="btn btn-ghost" id="importBtn" title="Import mocks from JSON">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Import
+      </button>
+      <button class="btn btn-ghost" id="exportBtn" title="Export all mocks as JSON">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export
+      </button>
+      <button class="btn btn-primary" id="newMockBtn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Mock
+      </button>
+      <button class="btn btn-ai" id="aiPanelBtn" title="AI Assistant">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/><circle cx="19" cy="5" r="3" fill="currentColor" stroke="none"/></svg>
+        AI
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Main ─────────────────────────────────────────────────────────── -->
+  <div class="main">
+
+    <!-- Left panel: mock list -->
+    <aside class="sidebar">
+      <div class="sidebar-search">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="searchInput" placeholder="Search mocks…" autocomplete="off">
+      </div>
+
+      <div class="sidebar-filters" id="methodFilters">
+        <button class="filter-btn active" data-method="">All</button>
+        <button class="filter-btn" data-method="GET">GET</button>
+        <button class="filter-btn" data-method="POST">POST</button>
+        <button class="filter-btn" data-method="PUT">PUT</button>
+        <button class="filter-btn" data-method="DELETE">DELETE</button>
+      </div>
+
+      <div class="mock-list" id="mockList">
+        <div class="list-empty">Loading…</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <span id="mockCount">0 mocks</span>
+        <button class="btn-link danger" id="deleteAllBtn">Delete all</button>
+      </div>
+    </aside>
+
+    <!-- Right panel: editor -->
+    <main class="editor-pane" id="editorPane">
+      <div class="editor-empty" id="editorEmpty">
+        <div class="editor-empty-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="13" x2="13" y2="13"/></svg>
+        </div>
+        <h2>No mock selected</h2>
+        <p>Select a mock from the list or create a new one</p>
+        <button class="btn btn-primary" id="emptyNewBtn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New Mock
+        </button>
+      </div>
+      <div class="editor-form hidden" id="editorForm"></div>
+    </main>
+  </div>
+
+  <!-- Hidden file input for import -->
+  <input type="file" id="importFile" accept=".json" style="display:none">
+
+  <!-- ── AI Panel (slide-out drawer) ─────────────────────────────────── -->
+  <div class="ai-backdrop hidden" id="aiBackdrop"></div>
+  <aside class="ai-panel hidden" id="aiPanel">
+
+    <div class="ai-panel-header">
+      <div class="ai-panel-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0090f0" stroke-width="2" stroke-linecap="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/><circle cx="19" cy="5" r="3" fill="#0090f0" stroke="none"/></svg>
+        AI Assistant
+      </div>
+      <div class="ai-panel-header-actions">
+        <button class="btn btn-ghost btn-sm" id="aiSettingsBtn" title="AI Settings">⚙</button>
+        <button class="btn btn-ghost btn-sm" id="aiClearBtn" title="Clear chat">Clear</button>
+        <button class="ai-close-btn" id="aiCloseBtn">&times;</button>
+      </div>
+    </div>
+
+    <!-- Settings pane (hidden by default) -->
+    <div class="ai-settings hidden" id="aiSettings">
+      <div class="ai-settings-title">AI Configuration</div>
+
+      <label class="ai-field-label">Provider</label>
+      <select class="input" id="aiProvider">
+        <option value="openai">OpenAI</option>
+        <option value="anthropic">Anthropic (Claude)</option>
+        <option value="custom">Custom (OpenAI-compatible)</option>
+      </select>
+
+      <label class="ai-field-label">API Key</label>
+      <input type="password" class="input" id="aiApiKey" placeholder="sk-... or key-...">
+
+      <label class="ai-field-label">Model</label>
+      <input type="text" class="input" id="aiModel" placeholder="gpt-4o-mini">
+
+      <div class="ai-model-hints" id="aiModelHints"></div>
+
+      <label class="ai-field-label" id="aiBaseUrlLabel" style="display:none">Base URL</label>
+      <input type="text" class="input hidden" id="aiBaseUrl" placeholder="http://localhost:11434/v1">
+
+      <div class="ai-settings-actions">
+        <button class="btn btn-ghost btn-sm" id="aiSettingsCancelBtn">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="aiSettingsSaveBtn">Save</button>
+      </div>
+    </div>
+
+    <!-- Quick actions -->
+    <div class="ai-quick-actions" id="aiQuickActions">
+      <button class="ai-chip" data-prompt="Generate a realistic POST stub for a REST API fleet management endpoint that returns a list of aircraft with tail number, status, and location. Include proper headers.">✨ Generate stub</button>
+      <button class="ai-chip" data-prompt="Analyze all current mocks. Identify duplicates, conflicting URL patterns, missing error cases, and configuration issues. Give concise bullet-point recommendations.">🔍 Analyze mocks</button>
+      <button class="ai-chip" data-prompt="List all current mocks. For each one that only has a 200 response, suggest what 4xx or 5xx error stubs I should add for complete test coverage.">🛡 Coverage gaps</button>
+      <button class="ai-chip" data-prompt="Look at all current mocks and identify any that have duplicate or overlapping URL patterns with the same method. Explain which would win based on priority.">⚡ Find conflicts</button>
+    </div>
+
+    <!-- Messages -->
+    <div class="ai-messages" id="aiMessages">
+      <div class="ai-welcome">
+        <strong>Mocxy AI</strong> — Ask me to generate stubs, analyze mocks, or explain matching rules.<br>
+        <span style="color:var(--subtle)">Strictly focused on API mocking.</span>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div class="ai-input-row">
+      <textarea
+        class="ai-textarea"
+        id="aiInput"
+        placeholder="Generate a stub for POST /api/auth/login that returns 200 with a token…"
+        rows="3"
+      ></textarea>
+      <button class="ai-send-btn" id="aiSendBtn" title="Send (Ctrl+Enter)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
