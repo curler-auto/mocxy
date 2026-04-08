@@ -26,7 +26,7 @@ const KEY_FILE   = join(CERTS_DIR, 'key.pem');
  *   2. Cached certs/cert.pem + certs/key.pem
  *   3. Auto-generate new self-signed cert (saved to certs/ for reuse)
  */
-export function getCerts() {
+export async function getCerts() {
   // 1. Environment override — bring-your-own trusted cert
   if (process.env.TLS_CERT && process.env.TLS_KEY) {
     console.log('  [TLS] Using certs from environment variables');
@@ -63,7 +63,7 @@ export function getCerts() {
     ],
   };
 
-  const pems = selfsigned.generate(attrs, opts);
+  const pems = await selfsigned.generate(attrs, opts);
 
   writeFileSync(CERT_FILE, pems.cert, 'utf8');
   writeFileSync(KEY_FILE,  pems.private, 'utf8');

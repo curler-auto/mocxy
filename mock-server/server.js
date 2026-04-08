@@ -535,7 +535,7 @@ app.listen(PORT, () => {
 
 // ── HTTPS ─────────────────────────────────────────────────────────────────
 try {
-  const tlsCreds = getCerts();
+  const tlsCreds = await getCerts();
   https.createServer(tlsCreds, app).listen(HTTPS_PORT, () => {
     console.log(`  [TLS] HTTPS server ready on https://localhost:${HTTPS_PORT}`);
   });
