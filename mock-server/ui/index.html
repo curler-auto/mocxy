@@ -28,7 +28,11 @@
     </div>
 
     <div class="topbar-actions">
-      <button class="btn btn-ghost" id="importBtn" title="Import mocks from JSON">
+      <button class="btn btn-ghost" id="importSpecBtn" title="Import OpenAPI spec as collection">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        OpenAPI
+      </button>
+      <button class="btn btn-ghost" id="importBtn" title="Import collection from JSON">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Import
       </button>
@@ -38,7 +42,7 @@
       </button>
       <button class="btn btn-primary" id="newMockBtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        New Mock
+        New Collection
       </button>
       <button class="btn btn-ai" id="aiPanelBtn" title="AI Assistant">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/><circle cx="19" cy="5" r="3" fill="currentColor" stroke="none"/></svg>
@@ -85,15 +89,54 @@
         <p>Select a mock from the list or create a new one</p>
         <button class="btn btn-primary" id="emptyNewBtn">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          New Mock
+          New Collection
         </button>
       </div>
       <div class="editor-form hidden" id="editorForm"></div>
     </main>
   </div>
 
-  <!-- Hidden file input for import -->
-  <input type="file" id="importFile" accept=".json" style="display:none">
+  <!-- Hidden file inputs -->
+  <input type="file" id="importFile"   accept=".json"                    style="display:none">
+  <input type="file" id="specFile"     accept=".json,.yaml,.yml,.txt"    style="display:none">
+
+  <!-- ── OpenAPI Import Dialog ──────────────────────────────────────────── -->
+  <div class="dialog-backdrop hidden" id="specDialogBackdrop">
+    <div class="dialog-box" id="specDialog">
+      <div class="dialog-header">
+        <span class="dialog-title">Import OpenAPI Spec</span>
+        <button class="ai-close-btn" id="specDialogClose">&times;</button>
+      </div>
+      <div class="dialog-body">
+        <div class="dialog-field">
+          <label class="dialog-label">Collection Name</label>
+          <input type="text" class="input" id="specColName" placeholder="Auto-detected from spec…">
+        </div>
+        <div class="dialog-field">
+          <label class="dialog-label">Spec File</label>
+          <div class="spec-file-row">
+            <span class="spec-filename" id="specFilename">No file selected</span>
+            <button class="btn btn-ghost btn-sm" id="specBrowseBtn">Browse…</button>
+          </div>
+        </div>
+        <div class="dialog-field" id="scenariosField">
+          <label class="dialog-label scenarios-label">
+            <input type="checkbox" id="withScenarios" class="scenarios-cb" disabled>
+            <span>Generate AI test scenarios</span>
+            <span class="scenarios-hint" id="scenariosHint"></span>
+          </label>
+          <p class="dialog-hint" id="scenariosDesc" style="display:none">
+            AI will derive happy path, error cases (401, 404, 400, 500) and create
+            separate mocks for each scenario — grouped in an "AI Scenarios" folder.
+          </p>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-ghost" id="specDialogCancel">Cancel</button>
+        <button class="btn btn-primary" id="specDialogImport" disabled>Import</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ── AI Panel (slide-out drawer) ─────────────────────────────────── -->
   <div class="ai-backdrop hidden" id="aiBackdrop"></div>

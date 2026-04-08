@@ -375,6 +375,33 @@ export async function getLogs(filter = {}) {
 }
 
 /**
+ * Count only log entries where intercepted is true.
+ * @returns {Promise<number>}
+ */
+export async function getInterceptedLogCount() {
+  const db = await _getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORES.LOGS, 'readonly');
+    const store = tx.objectStore(IDB_STORES.LOGS);
+    const request = store.openCursor();
+    let count = 0;
+
+    request.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        if (cursor.value.intercepted) {
+          count++;
+        }
+        cursor.continue();
+      } else {
+        resolve(count);
+      }
+    };
+    request.onerror = (event) => reject(event.target.error);
+  });
+}
+
+/**
  * Delete every entry in the request_logs store.
  */
 export async function clearLogs() {

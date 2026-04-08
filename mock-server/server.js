@@ -17,16 +17,28 @@ import { fileURLToPath } from 'url';
 import {
   load, getAll, getById, create, update, remove, removeAll, importAll, reload,
 } from './store.js';
+import {
+  load       as loadCollections,
+  getAll     as getAllCollections,
+  getById    as getCollectionById,
+  getAllMocks as getAllCollectionMocks,
+  createCollection, updateCollection, removeCollection,
+  addFolder, updateFolder, removeFolder,
+  addMock, updateMock, removeMock, moveMock,
+  recordHit, exportCollection, importCollection,
+  defaultMock,
+} from './collection-store.js';
 import { findMatch } from './matcher.js';
 import {
   loadConfig, saveConfig, getConfig, setApiKey, chat, extractStubs,
 } from './ai.js';
+import { parseSpec, prepareScenarios, applyScenarios } from './openapi-parser.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app     = express();
 const PORT    = parseInt(process.env.PORT || '5000', 10);
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const START   = Date.now();
 
 /* -------------------------------------------------------------------------- */
@@ -196,9 +208,174 @@ admin.delete('/mocks', async (_req, res) => {
 
 app.use('/mocxy/admin', admin);
 
+// ── Collections API  (/mocxy/admin/collections/*) ────────────────────────
+
+const cols = express.Router();
+
+// List all collections (summary)
+cols.get('/', (_req, res) => res.json(getAllCollections()));
+
+// Export single collection
+cols.get('/:id/export', (req, res) => {
+  const col = exportCollection(req.params.id);
+  if (!col) return res.status(404).json({ error: 'Collection not found' });
+  res.setHeader('Content-Disposition', `attachment; filename="${col.name.replace(/[^a-z0-9]/gi,'_')}.json"`);
+  res.json(col);
+});
+
+// Get full collection (with items tree)
+cols.get('/:id', (req, res) => {
+  const col = getCollectionById(req.params.id);
+  if (!col) return res.status(404).json({ error: 'Collection not found' });
+  res.json(col);
+});
+
+// Create collection
+cols.post('/', async (req, res) => {
+  try { res.status(201).json(await createCollection(req.body)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Import collection
+cols.post('/import', async (req, res) => {
+  try { res.status(201).json(await importCollection(req.body)); }
+  catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Update collection metadata
+cols.put('/:id', async (req, res) => {
+  const col = await updateCollection(req.params.id, req.body);
+  if (!col) return res.status(404).json({ error: 'Collection not found' });
+  res.json(col);
+});
+
+// Delete collection
+cols.delete('/:id', async (req, res) => {
+  const ok = await removeCollection(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Collection not found' });
+  res.json({ deleted: true });
+});
+
+// ── Folders ──
+// Add folder (body: { name, parentFolderId? })
+cols.post('/:id/folders', async (req, res) => {
+  const { parentFolderId, ...data } = req.body || {};
+  const folder = await addFolder(req.params.id, parentFolderId || null, data);
+  if (!folder) return res.status(404).json({ error: 'Collection or parent folder not found' });
+  res.status(201).json(folder);
+});
+
+// Rename folder
+cols.put('/:id/folders/:fid', async (req, res) => {
+  const folder = await updateFolder(req.params.id, req.params.fid, req.body);
+  if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  res.json(folder);
+});
+
+// Delete folder
+cols.delete('/:id/folders/:fid', async (req, res) => {
+  const ok = await removeFolder(req.params.id, req.params.fid);
+  if (!ok) return res.status(404).json({ error: 'Folder not found' });
+  res.json({ deleted: true });
+});
+
+// ── Mocks in collections ──
+// Add mock (body includes optional folderId)
+cols.post('/:id/mocks', async (req, res) => {
+  const { folderId, ...data } = req.body || {};
+  const mock = await addMock(req.params.id, folderId || null, data);
+  if (!mock) return res.status(404).json({ error: 'Collection or folder not found' });
+  res.status(201).json(mock);
+});
+
+// Update mock
+cols.put('/:id/mocks/:mid', async (req, res) => {
+  const mock = await updateMock(req.params.id, req.params.mid, req.body);
+  if (!mock) return res.status(404).json({ error: 'Mock not found' });
+  res.json(mock);
+});
+
+// Move mock to different folder
+cols.put('/:id/mocks/:mid/move', async (req, res) => {
+  const mock = await moveMock(req.params.id, req.params.mid, req.body.targetFolderId || null);
+  if (!mock) return res.status(404).json({ error: 'Mock or target not found' });
+  res.json(mock);
+});
+
+// Delete mock
+cols.delete('/:id/mocks/:mid', async (req, res) => {
+  const ok = await removeMock(req.params.id, req.params.mid);
+  if (!ok) return res.status(404).json({ error: 'Mock not found' });
+  res.json({ deleted: true });
+});
+
+// ── Import OpenAPI spec ──────────────────────────────────────────────────
+cols.post('/import-openapi', async (req, res) => {
+  const { spec: raw, withScenarios = false, name } = req.body || {};
+  if (!raw) return res.status(400).json({ error: 'spec is required' });
+
+  try {
+    if (!withScenarios) {
+      const col = parseSpec(raw, { name });
+      const saved = await createCollection(col);
+      return res.status(201).json(saved);
+    }
+
+    // With AI scenarios
+    const { collection, scenarioPrompt } = prepareScenarios(raw);
+    if (name) collection.name = name;
+
+    let finalCol = collection;
+    try {
+      const llmReply = await chat([{ role: 'user', content: scenarioPrompt }]);
+      const stubs    = extractStubs(llmReply);
+      if (stubs.length > 0) finalCol = applyScenarios(collection, stubs);
+    } catch (aiErr) {
+      console.warn('  [openapi] AI scenario generation failed:', aiErr.message, '— using basic mocks');
+    }
+
+    const saved = await createCollection(finalCol);
+    res.status(201).json(saved);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── Duplicate collection ──────────────────────────────────────────────────
+cols.post('/:id/duplicate', async (req, res) => {
+  const src = getCollectionById(req.params.id);
+  if (!src) return res.status(404).json({ error: 'Collection not found' });
+
+  // Deep clone + re-assign all IDs
+  const clone = JSON.parse(JSON.stringify(src));
+  clone.id        = crypto.randomUUID();
+  clone.name      = req.body?.name || src.name + ' (copy)';
+  clone.createdAt = new Date().toISOString();
+  clone.updatedAt = null;
+  cloneIds(clone.items || []);
+
+  const saved = await createCollection(clone);
+  res.status(201).json(saved);
+});
+
+function cloneIds(items) {
+  for (const item of items) {
+    item.id = crypto.randomUUID();
+    if (item.type === 'folder') cloneIds(item.items || []);
+  }
+}
+
+app.use('/mocxy/admin/collections', cols);
+
 // ── AI API  (/mocxy/ai/*) ─────────────────────────────────────────────────
 
 const ai = express.Router();
+
+// Has key configured? (used by UI to enable/disable AI features)
+ai.get('/has-key', (_req, res) => {
+  const cfg = getConfig();
+  res.json({ configured: !!(cfg.apiKey && cfg.apiKey !== '••••') });
+});
 
 // Get AI config (key is masked)
 ai.get('/config', (_req, res) => {
@@ -270,7 +447,8 @@ app.all('*', async (req, res) => {
   // Skip favicon
   if (req.path === '/favicon.ico') return res.status(204).end();
 
-  const mocks   = getAll();
+  // Merge flat stubs + collection mocks for matching
+  const mocks   = [...getAll(), ...getAllCollectionMocks()];
   const matched = findMatch(req, mocks);
 
   if (!matched) {
@@ -285,13 +463,12 @@ app.all('*', async (req, res) => {
     });
   }
 
-  // Update hit stats (fire-and-forget, don't block response)
-  update(matched.id, {
-    stats: {
-      matched:       (matched.stats?.matched || 0) + 1,
-      lastMatchedAt: new Date().toISOString(),
-    },
-  }).catch(() => {});
+  // Update hit stats — try collection store first, fall back to flat store
+  recordHit(matched.id).catch(() =>
+    update(matched.id, {
+      stats: { matched: (matched.stats?.matched || 0) + 1, lastMatchedAt: new Date().toISOString() },
+    }).catch(() => {})
+  );
 
   const resp = matched.response || {};
 
@@ -332,6 +509,7 @@ app.all('*', async (req, res) => {
 /* -------------------------------------------------------------------------- */
 
 await load();
+await loadCollections();
 await loadConfig();
 
 app.listen(PORT, () => {

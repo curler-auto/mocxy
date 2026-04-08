@@ -3,3 +3,7 @@
 *.pem
 node_modules/
 *.zip
+build/
+*.log
+.DS_Store
+*.tmp

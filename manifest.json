@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Mocxy — API Interceptor & Mock",
   "short_name": "Mocxy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Intercept, redirect, rewrite and mock API requests. Block requests, inject JS/CSS, match by URL, headers, query params and payload.",
   "minimum_chrome_version": "112",
   "permissions": [

@@ -19,6 +19,7 @@ import {
   addLogEntry,
   getLogs,
   clearLogs,
+  getInterceptedLogCount,
   exportAll,
   importAll,
 } from './storage-manager.js';
@@ -96,15 +97,23 @@ async function _route(message, _sender) {
 
     /* ---- Status snapshot ---- */
     case MSG_TYPES.GET_STATUS: {
-      const [statusEnabled, statusRules, statusCollections] = await Promise.all([
+      const [statusEnabled, statusRules, statusCollections, interceptedCount] = await Promise.all([
         isEnabled(),
         getRules(),
         getMockCollections(),
+        getInterceptedLogCount(),
       ]);
+
+      const activeRules = statusRules.filter((r) => r.enabled !== false);
+      const mockActionTypes = ['mock_inline', 'mock_server', 'graphql_mock'];
+      const activeMocks = activeRules.filter((r) => mockActionTypes.includes(r.action?.type)).length;
+
       return {
         enabled: statusEnabled,
         ruleCount: statusRules.length,
-        activeRules: statusRules.filter((r) => r.enabled !== false).length,
+        activeRules: activeRules.length,
+        activeMocks: activeMocks,
+        interceptedCount: interceptedCount,
         activeCollections: statusCollections.filter((c) => c.enabled !== false).length,
       };
     }

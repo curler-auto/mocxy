@@ -6,6 +6,128 @@
 'use strict';
 
 /* =========================================================================
+   AI KEY GUARD — check once on load, cache result
+   ========================================================================= */
+
+let _aiKeyConfigured = false;
+
+async function checkAiKey() {
+  try {
+    const r = await fetch('/mocxy/ai/has-key').then(x => x.json());
+    _aiKeyConfigured = r.configured === true;
+  } catch (_) { _aiKeyConfigured = false; }
+  applyAiKeyGuards();
+}
+
+function applyAiKeyGuards() {
+  // AI panel send button
+  const sendBtn = document.getElementById('aiSendBtn');
+  if (sendBtn) {
+    sendBtn.disabled = !_aiKeyConfigured;
+    sendBtn.title    = _aiKeyConfigured ? 'Send (Ctrl+Enter)' : 'Configure an AI key in Settings first';
+  }
+  // Scenarios checkbox in import dialog
+  const cb   = document.getElementById('withScenarios');
+  const hint = document.getElementById('scenariosHint');
+  if (cb) {
+    cb.disabled = !_aiKeyConfigured;
+    if (hint) hint.textContent = _aiKeyConfigured ? '' : '(requires AI key in Settings)';
+  }
+}
+
+/* =========================================================================
+   OPENAPI IMPORT DIALOG
+   ========================================================================= */
+
+let _specRawContent = '';
+
+function initSpecDialog() {
+  const backdrop   = document.getElementById('specDialogBackdrop');
+  const browseBtn  = document.getElementById('specBrowseBtn');
+  const fileInput  = document.getElementById('specFile');
+  const filenameEl = document.getElementById('specFilename');
+  const colNameEl  = document.getElementById('specColName');
+  const importBtn  = document.getElementById('specDialogImport');
+  const cancelBtn  = document.getElementById('specDialogCancel');
+  const closeBtn   = document.getElementById('specDialogClose');
+  const withAi     = document.getElementById('withScenarios');
+  const aiDesc     = document.getElementById('scenariosDesc');
+
+  function openDialog() {
+    _specRawContent = '';
+    filenameEl.textContent = 'No file selected';
+    colNameEl.value  = '';
+    importBtn.disabled = true;
+    if (withAi) { withAi.checked = false; withAi.disabled = !_aiKeyConfigured; }
+    if (aiDesc) aiDesc.style.display = 'none';
+    backdrop.classList.remove('hidden');
+    applyAiKeyGuards();
+  }
+
+  function closeDialog() { backdrop.classList.add('hidden'); }
+
+  // Open via topbar button
+  document.getElementById('importSpecBtn')?.addEventListener('click', openDialog);
+  cancelBtn?.addEventListener('click', closeDialog);
+  closeBtn?.addEventListener('click', closeDialog);
+  backdrop?.addEventListener('click', e => { if (e.target === backdrop) closeDialog(); });
+
+  // File picker
+  browseBtn?.addEventListener('click', () => fileInput.click());
+  fileInput?.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    filenameEl.textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      _specRawContent = ev.target.result;
+      importBtn.disabled = false;
+      // Try to pre-fill collection name from spec
+      try {
+        const parsed = _specRawContent.trim().startsWith('{')
+          ? JSON.parse(_specRawContent)
+          : null; // YAML parsing happens server-side
+        if (parsed?.info?.title && !colNameEl.value) {
+          colNameEl.value = parsed.info.title;
+        }
+      } catch (_) {}
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
+  // Toggle AI description
+  withAi?.addEventListener('change', () => {
+    if (aiDesc) aiDesc.style.display = withAi.checked ? 'block' : 'none';
+  });
+
+  // Import
+  importBtn?.addEventListener('click', async () => {
+    if (!_specRawContent) return;
+    importBtn.disabled = true;
+    importBtn.textContent = withAi?.checked ? 'Generating scenarios…' : 'Importing…';
+    try {
+      const col = await colFetch('/import-openapi', {
+        method: 'POST',
+        body: JSON.stringify({
+          spec:          _specRawContent,
+          name:          colNameEl.value.trim() || undefined,
+          withScenarios: withAi?.checked ?? false,
+        }),
+      });
+      _expanded[col.id] = new Set(['__root__']);
+      await loadMocks();
+      closeDialog();
+      toast(`Collection "${col.name}" created (${col.items?.length || 0} folder(s))`, 'success');
+    } catch (err) {
+      toast('Import failed: ' + err.message, 'error');
+      importBtn.disabled = false;
+      importBtn.textContent = 'Import';
+    }
+  });
+}
+
+/* =========================================================================
    AI PANEL
    ========================================================================= */
 
@@ -73,6 +195,7 @@ async function saveAiConfig() {
     });
     document.getElementById('aiSettings').classList.add('hidden');
     toast('AI settings saved', 'success');
+    await checkAiKey();   // re-enable AI features if key was just added
   } catch (err) { toast('Save failed: ' + err.message, 'error'); }
 }
 
@@ -247,13 +370,16 @@ function initAiPanel() {
 /*  State                                                                     */
 /* -------------------------------------------------------------------------- */
 
-let _mocks       = [];
-let _selectedId  = null;
-let _filterMethod = '';
-let _searchQuery = '';
-let _draft       = null;   // currently editing mock (deep clone)
+let _collections  = [];    // summary list from server
+let _searchQuery  = '';
+let _selectedId   = null;  // selected mock id
+let _selectedColId = null; // collection the selected mock lives in
+let _draft        = null;  // deep clone being edited
+// Expanded state: collectionId → Set of expanded folderIds (+ '__root__' = expanded)
+const _expanded   = {};
 
-const API = '/mocxy/admin';
+const API   = '/mocxy/admin';
+const CAPI  = '/mocxy/admin/collections';
 
 /* -------------------------------------------------------------------------- */
 /*  API helpers                                                               */
@@ -271,171 +397,548 @@ async function apiFetch(path, opts = {}) {
   return res.status === 204 ? null : res.json();
 }
 
+async function colFetch(path, opts = {}) {
+  const res = await fetch(CAPI + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
 /* -------------------------------------------------------------------------- */
-/*  Load + refresh                                                            */
+/*  Health + load                                                             */
 /* -------------------------------------------------------------------------- */
 
 async function loadMocks() {
   try {
-    const list  = await apiFetch('/mocks');
-    _mocks = Array.isArray(list) ? list : [];
-    renderMockList();
+    _collections = await colFetch('/') || [];
+    renderSidebar();
     updateHealthBar();
+    restoreFromHash();
   } catch (err) {
     setOffline(err.message);
   }
 }
 
+function restoreFromHash() {
+  const hash = window.location.hash.slice(1);
+  if (!hash || hash === 'new') return;
+  // Try to find and select the mock from the hash
+  // We'll fetch full collections lazily when needed
+  if (_selectedId !== hash) {
+    // Defer: the full tree is fetched on demand
+  }
+}
+
 async function updateHealthBar() {
   try {
-    const h = await apiFetch('/health');
-    const dot  = document.getElementById('statusDot');
-    const text = document.getElementById('statusText');
-    dot.className = 'status-dot connected';
-    text.textContent = `Connected · v${h.version} · ${h.mocks} mock${h.mocks !== 1 ? 's' : ''} · uptime ${Math.floor((h.uptime||0)/60)}m`;
-  } catch (_) {
-    setOffline('Server not reachable');
-  }
+    const h   = await apiFetch('/health');
+    const total = _collections.reduce((s, c) => s + (c.mockCount || 0), 0);
+    document.getElementById('statusDot').className = 'status-dot connected';
+    document.getElementById('statusText').textContent =
+      `Connected · v${h.version} · ${_collections.length} collection${_collections.length !== 1 ? 's' : ''} · ${total} mock${total !== 1 ? 's' : ''} · uptime ${Math.floor((h.uptime||0)/60)}m`;
+  } catch (_) { setOffline('Server not reachable'); }
 }
 
 function setOffline(msg) {
-  const dot  = document.getElementById('statusDot');
-  const text = document.getElementById('statusText');
-  dot.className = 'status-dot offline';
-  text.textContent = `Offline — ${msg}`;
+  document.getElementById('statusDot').className = 'status-dot offline';
+  document.getElementById('statusText').textContent = `Offline — ${msg}`;
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Mock list rendering                                                       */
+/*  Helper: flatten all mocks from a collection items tree                   */
 /* -------------------------------------------------------------------------- */
 
-function filteredMocks() {
-  let list = [..._mocks];
-  if (_filterMethod) {
-    list = list.filter(m => (m.request?.method || 'ANY').toUpperCase() === _filterMethod);
+function flattenItems(items) {
+  const mocks = [];
+  for (const item of (items || [])) {
+    if (item.type === 'mock')   mocks.push(item);
+    else if (item.type === 'folder') mocks.push(...flattenItems(item.items));
   }
-  if (_searchQuery) {
-    const q = _searchQuery.toLowerCase();
-    list = list.filter(m =>
-      (m.name || '').toLowerCase().includes(q) ||
-      (m.request?.url || '').toLowerCase().includes(q)
-    );
-  }
-  return list.sort((a,b) => (b.priority||0) - (a.priority||0));
+  return mocks;
 }
 
-function renderMockList() {
+function findMockInTree(items, id) {
+  for (const item of (items || [])) {
+    if (item.type === 'mock' && item.id === id) return item;
+    if (item.type === 'folder') {
+      const found = findMockInTree(item.items, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Sidebar — collection tree                                                 */
+/* -------------------------------------------------------------------------- */
+
+function renderSidebar() {
   const container = document.getElementById('mockList');
-  const count     = document.getElementById('mockCount');
-  const list      = filteredMocks();
+  const countEl   = document.getElementById('mockCount');
+  const total     = _collections.reduce((s, c) => s + (c.mockCount || 0), 0);
+  countEl.textContent = `${_collections.length} collection${_collections.length !== 1 ? 's' : ''} · ${total} mock${total !== 1 ? 's' : ''}`;
 
-  count.textContent = `${_mocks.length} mock${_mocks.length !== 1 ? 's' : ''}`;
+  const q = _searchQuery.toLowerCase();
 
-  if (list.length === 0) {
-    container.innerHTML = `<div class="list-empty">${_mocks.length === 0 ? 'No mocks yet — click New Mock' : 'No results'}</div>`;
+  if (_collections.length === 0) {
+    container.innerHTML = '<div class="list-empty">No collections — click New Collection</div>';
     return;
   }
-
   container.innerHTML = '';
-  list.forEach(mock => {
-    const item   = document.createElement('div');
-    item.className = `mock-item${mock.id === _selectedId ? ' active' : ''}`;
-    item.dataset.id = mock.id;
+  _collections.forEach(col => renderCollectionRow(container, col, q));
+}
 
-    const method = (mock.request?.method || 'ANY').toUpperCase();
-    const badge  = document.createElement('span');
-    badge.className = `mock-item-badge badge-${method.toLowerCase()}`;
-    badge.textContent = method;
+function renderCollectionRow(container, colSummary, q) {
+  const expanded = _expanded[colSummary.id]?.has('__root__') ?? true;
 
-    const info = document.createElement('div');
-    info.className = 'mock-item-info';
+  const wrapper = el('div', { className: 'col-wrapper' });
 
-    const name = document.createElement('div');
-    name.className = 'mock-item-name';
-    name.textContent = mock.name || 'Untitled';
+  // ── Collection header row ──
+  const header = el('div', { className: 'col-header' });
+  const arrow  = el('span', { className: `col-arrow${expanded ? ' open' : ''}`, textContent: '▶' });
+  const dot    = el('span', { className: `col-dot${colSummary.enabled !== false ? ' active' : ''}` });
+  const name   = el('span', { className: 'col-name', textContent: colSummary.name });
+  const count  = el('span', { className: 'col-count', textContent: colSummary.mockCount || 0 });
+  const menu   = el('button', { className: 'col-menu-btn', textContent: '⋯', title: 'Options' });
 
-    const url = document.createElement('div');
-    url.className = 'mock-item-url';
-    url.textContent = mock.request?.url || '(any URL)';
+  header.appendChild(arrow);
+  header.appendChild(dot);
+  header.appendChild(name);
+  header.appendChild(count);
+  header.appendChild(menu);
+  wrapper.appendChild(header);
 
-    const meta = document.createElement('div');
-    meta.className = 'mock-item-meta';
-
-    const hits = document.createElement('span');
-    hits.className = 'mock-item-hits';
-    hits.textContent = `${mock.stats?.matched || 0} hits`;
-    meta.appendChild(hits);
-
-    if (mock.enabled === false) {
-      const dis = document.createElement('span');
-      dis.className = 'mock-item-disabled';
-      dis.textContent = 'disabled';
-      meta.appendChild(dis);
-    }
-
-    info.appendChild(name);
-    info.appendChild(url);
-    info.appendChild(meta);
-
-    const del = document.createElement('button');
-    del.className = 'mock-item-del';
-    del.innerHTML = '&#10005;';
-    del.title = 'Delete';
-    del.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      if (!confirm(`Delete "${mock.name || 'Untitled'}"?`)) return;
+  // Toggle expand/collapse
+  header.addEventListener('click', async (e) => {
+    if (e.target === menu) return;
+    const isNowExpanded = !(_expanded[colSummary.id]?.has('__root__') ?? true);
+    toggleExpand(colSummary.id, '__root__', isNowExpanded);
+    if (isNowExpanded) {
+      // Fetch full collection on first expand
       try {
-        await apiFetch(`/mocks/${mock.id}`, { method: 'DELETE' });
-        if (_selectedId === mock.id) { _selectedId = null; showEmpty(); }
-        await loadMocks();
-        toast('Mock deleted', 'success');
-      } catch (err) {
-        toast('Delete failed: ' + err.message, 'error');
-      }
-    });
-
-    item.appendChild(badge);
-    item.appendChild(info);
-    item.appendChild(del);
-    item.addEventListener('click', () => selectMock(mock.id));
-    container.appendChild(item);
+        const full = await colFetch(`/${colSummary.id}`);
+        colSummary._full = full;
+      } catch (_) {}
+    }
+    renderSidebar();
   });
+
+  // Context menu
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showColMenu(e, colSummary);
+  });
+
+  // ── Items tree (if expanded) ──
+  if (expanded) {
+    const items = el('div', { className: 'col-items' });
+
+    if (!colSummary._full) {
+      // Lazy load full collection
+      const loading = el('div', { className: 'tree-loading', textContent: 'Loading…' });
+      items.appendChild(loading);
+      colFetch(`/${colSummary.id}`).then(full => {
+        colSummary._full = full;
+        renderSidebar();
+      }).catch(() => { loading.textContent = 'Failed to load'; });
+    } else {
+      const visibleItems = filterItems(colSummary._full.items || [], q);
+      if (visibleItems.length === 0 && !q) {
+        items.appendChild(el('div', { className: 'tree-empty', textContent: 'Empty collection' }));
+      } else {
+        renderItems(items, colSummary, visibleItems, colSummary.id, null, q);
+      }
+    }
+    wrapper.appendChild(items);
+  }
+
+  container.appendChild(wrapper);
+}
+
+function filterItems(items, q) {
+  if (!q) return items;
+  return items.filter(item => {
+    if (item.type === 'mock') {
+      return (item.name || '').toLowerCase().includes(q) ||
+             (item.request?.url || '').toLowerCase().includes(q);
+    }
+    if (item.type === 'folder') {
+      return (item.name || '').toLowerCase().includes(q) ||
+             filterItems(item.items || [], q).length > 0;
+    }
+    return false;
+  });
+}
+
+function renderItems(container, colSummary, items, colId, parentFolderId, q) {
+  items.forEach(item => {
+    if (item.type === 'folder') {
+      renderFolderRow(container, colSummary, item, colId, q);
+    } else if (item.type === 'mock') {
+      renderMockRow(container, colSummary, item, colId, parentFolderId);
+    }
+  });
+}
+
+function renderFolderRow(container, colSummary, folder, colId, q) {
+  const expanded = _expanded[colId]?.has(folder.id) ?? false;
+  const wrapper  = el('div', { className: 'folder-wrapper' });
+  const row      = el('div', { className: 'folder-row' });
+
+  const arrow   = el('span', { className: `folder-arrow${expanded ? ' open' : ''}`, textContent: '▶' });
+  const icon    = el('span', { className: 'folder-icon', textContent: '📁' });
+  const name    = el('span', { className: 'folder-name', textContent: folder.name });
+  const menu    = el('button', { className: 'col-menu-btn', textContent: '⋯', title: 'Folder options' });
+
+  row.appendChild(arrow);
+  row.appendChild(icon);
+  row.appendChild(name);
+  row.appendChild(menu);
+  wrapper.appendChild(row);
+
+  row.addEventListener('click', (e) => {
+    if (e.target === menu) return;
+    toggleExpand(colId, folder.id, !expanded);
+    renderSidebar();
+  });
+
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showFolderMenu(e, colSummary, folder, colId);
+  });
+
+  if (expanded) {
+    const children = el('div', { className: 'folder-children' });
+    const visible  = filterItems(folder.items || [], q);
+    if (visible.length === 0 && !q) {
+      children.appendChild(el('div', { className: 'tree-empty', textContent: 'Empty folder' }));
+    } else {
+      renderItems(children, colSummary, visible, colId, folder.id, q);
+    }
+    wrapper.appendChild(children);
+  }
+
+  container.appendChild(wrapper);
+}
+
+function renderMockRow(container, colSummary, mock, colId, folderId) {
+  const isActive = mock.id === _selectedId;
+  const row      = el('div', { className: `mock-row${isActive ? ' active' : ''}` });
+  const method   = (mock.request?.method || 'ANY').toUpperCase();
+  const badge    = el('span', { className: `mock-item-badge badge-${method.toLowerCase()}`, textContent: method });
+  const info     = el('div', { className: 'mock-row-info' });
+  info.appendChild(el('div', { className: 'mock-item-name', textContent: mock.name || 'Untitled' }));
+  info.appendChild(el('div', { className: 'mock-item-url',  textContent: mock.request?.url || '(any URL)' }));
+  if (mock.stats?.matched) {
+    info.appendChild(el('div', { className: 'mock-item-hits', textContent: `${mock.stats.matched} hits` }));
+  }
+  const menu = el('button', { className: 'col-menu-btn', textContent: '⋯', title: 'Mock options' });
+  menu.addEventListener('click', (e) => { e.stopPropagation(); showMockMenu(e, colSummary, mock, colId, folderId); });
+
+  row.appendChild(badge);
+  row.appendChild(info);
+  row.appendChild(menu);
+  row.addEventListener('click', (e) => { if (e.target !== menu) selectMock(mock, colSummary, colId, folderId); });
+  container.appendChild(row);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Expand state                                                              */
+/* -------------------------------------------------------------------------- */
+
+function toggleExpand(colId, key, expand) {
+  if (!_expanded[colId]) _expanded[colId] = new Set(['__root__']);
+  if (expand) _expanded[colId].add(key);
+  else        _expanded[colId].delete(key);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Context menus                                                             */
+/* -------------------------------------------------------------------------- */
+
+function showColMenu(e, col) {
+  showMenu(e, [
+    { label: '+ Add Mock',         action: () => showNewMockDialog(col, null) },
+    { label: '+ Add Folder',       action: () => showNewFolderDialog(col, null) },
+    { separator: true },
+    { label: '✎ Rename',           action: () => renameCollection(col) },
+    { label: '⎘ Duplicate',        action: () => duplicateCollection(col) },
+    { label: '↓ Export',           action: () => exportCol(col) },
+    { separator: true },
+    { label: col.enabled !== false ? '○ Disable' : '● Enable',
+      action: () => toggleCollection(col) },
+    { label: '✕ Delete',           action: () => deleteCollection(col), danger: true },
+  ]);
+}
+
+function showFolderMenu(e, col, folder, colId) {
+  showMenu(e, [
+    { label: '+ Add Mock',      action: () => showNewMockDialog(col, folder.id) },
+    { label: '+ Add Sub-folder',action: () => showNewFolderDialog(col, folder.id) },
+    { separator: true },
+    { label: '✎ Rename',        action: () => renameFolder(col, folder) },
+    { label: '✕ Delete',        action: () => deleteFolder(col, folder), danger: true },
+  ]);
+}
+
+function showMockMenu(e, col, mock, colId, folderId) {
+  showMenu(e, [
+    { label: '✎ Edit',    action: () => selectMock(mock, col, colId, folderId) },
+    { label: '⎘ Duplicate', action: () => duplicateMock(col, mock, folderId) },
+    { label: '↕ Move to…', action: () => showMoveDialog(col, mock) },
+    { separator: true },
+    { label: '✕ Delete',  action: () => deleteMockItem(col, mock), danger: true },
+  ]);
+}
+
+let _activeMenu = null;
+function showMenu(e, items) {
+  _activeMenu?.remove();
+  const menu = el('div', { className: 'ctx-menu' });
+  items.forEach(item => {
+    if (item.separator) { menu.appendChild(el('div', { className: 'ctx-sep' })); return; }
+    const btn = el('button', {
+      className: `ctx-item${item.danger ? ' danger' : ''}`,
+      textContent: item.label,
+    });
+    btn.addEventListener('click', () => { menu.remove(); item.action(); });
+    menu.appendChild(btn);
+  });
+
+  document.body.appendChild(menu);
+  _activeMenu = menu;
+
+  // Position near the click
+  const rect = e.target.getBoundingClientRect();
+  menu.style.top  = `${Math.min(rect.bottom + 2, window.innerHeight - menu.offsetHeight - 8)}px`;
+  menu.style.left = `${Math.min(rect.left, window.innerWidth - 180)}px`;
+
+  setTimeout(() => document.addEventListener('click', () => { menu.remove(); _activeMenu = null; }, { once: true }), 0);
 }
 
 /* -------------------------------------------------------------------------- */
 /*  Selection                                                                 */
 /* -------------------------------------------------------------------------- */
 
-function selectMock(id) {
-  const mock = _mocks.find(m => m.id === id);
-  if (!mock) return;
-  _selectedId = id;
+function selectMock(mock, colSummary, colId, folderId) {
+  _selectedId    = mock.id;
+  _selectedColId = colId;
   _draft = JSON.parse(JSON.stringify(mock));
-  renderMockList();
-  buildEditor(_draft);
-}
-
-function newMock() {
-  _selectedId = null;
-  _draft = {
-    id: null, name: '', priority: 0, enabled: true,
-    request:  { method: 'ANY', urlMatchType: 'contains', url: '', queryParams: [], headers: [], bodyPatterns: [] },
-    response: { status: 200, headers: { 'Content-Type': 'application/json' }, body: '{}', delayMs: 0, delayJitter: 0, fault: 'none' },
-  };
-  renderMockList();
-  buildEditor(_draft);
+  history.replaceState(null, '', `#${mock.id}`);
+  renderSidebar();
+  buildEditor(_draft, colId, folderId);
 }
 
 function showEmpty() {
   document.getElementById('editorEmpty').classList.remove('hidden');
   document.getElementById('editorForm').classList.add('hidden');
+  history.replaceState(null, '', location.pathname);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  New mock / folder dialogs                                                 */
+/* -------------------------------------------------------------------------- */
+
+async function showNewMockDialog(col, folderId) {
+  const name = prompt('Mock name:', 'New Mock');
+  if (!name) return;
+  try {
+    const mock = await colFetch(`/${col.id}/mocks`, {
+      method: 'POST',
+      body: JSON.stringify({ name, folderId: folderId || undefined }),
+    });
+    // Expand the parent so user can see the new mock
+    if (!_expanded[col.id]) _expanded[col.id] = new Set(['__root__']);
+    _expanded[col.id].add('__root__');
+    if (folderId) _expanded[col.id].add(folderId);
+    await loadMocks();
+    // Select the new mock for editing
+    const full = await colFetch(`/${col.id}`);
+    col._full  = full;
+    const found = findMockInTree(full.items, mock.id);
+    if (found) selectMock(found, col, col.id, folderId);
+    toast('Mock created', 'success');
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+async function showNewFolderDialog(col, parentFolderId) {
+  const name = prompt('Folder name:', 'New Folder');
+  if (!name) return;
+  try {
+    await colFetch(`/${col.id}/folders`, {
+      method: 'POST',
+      body: JSON.stringify({ name, parentFolderId: parentFolderId || undefined }),
+    });
+    if (!_expanded[col.id]) _expanded[col.id] = new Set(['__root__']);
+    _expanded[col.id].add('__root__');
+    if (parentFolderId) _expanded[col.id].add(parentFolderId);
+    await loadMocks();
+    toast('Folder created', 'success');
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Collection actions                                                        */
+/* -------------------------------------------------------------------------- */
+
+async function renameCollection(col) {
+  const name = prompt('Collection name:', col.name);
+  if (!name || name === col.name) return;
+  try {
+    await colFetch(`/${col.id}`, { method: 'PUT', body: JSON.stringify({ name }) });
+    await loadMocks();
+    toast('Renamed', 'success');
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+async function toggleCollection(col) {
+  try {
+    await colFetch(`/${col.id}`, { method: 'PUT', body: JSON.stringify({ enabled: col.enabled === false }) });
+    await loadMocks();
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+async function deleteCollection(col) {
+  if (!confirm(`Delete collection "${col.name}" and ALL its mocks?`)) return;
+  try {
+    await colFetch(`/${col.id}`, { method: 'DELETE' });
+    if (_selectedColId === col.id) { _selectedId = null; _selectedColId = null; showEmpty(); }
+    await loadMocks();
+    toast('Collection deleted', 'success');
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+async function duplicateCollection(col) {
+  const name = prompt('Name for the duplicate:', col.name + ' (copy)');
+  if (!name) return;
+  try {
+    const dup = await colFetch(`/${col.id}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    _expanded[dup.id] = new Set(['__root__']);
+    await loadMocks();
+    toast(`Duplicated as "${dup.name}"`, 'success');
+  } catch (err) { toast('Duplicate failed: ' + err.message, 'error'); }
+}
+
+async function exportCol(col) {
+  try {
+    const res  = await fetch(`${CAPI}/${col.id}/export`);
+    const data = await res.json();
+    downloadJson(data, col.name.replace(/[^a-z0-9]/gi, '_'));
+    toast(`Exported "${col.name}"`, 'success');
+  } catch (err) { toast('Export failed: ' + err.message, 'error'); }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Folder actions                                                            */
+/* -------------------------------------------------------------------------- */
+
+async function renameFolder(col, folder) {
+  const name = prompt('Folder name:', folder.name);
+  if (!name || name === folder.name) return;
+  try {
+    await colFetch(`/${col.id}/folders/${folder.id}`, { method: 'PUT', body: JSON.stringify({ name }) });
+    await loadMocks();
+    toast('Renamed', 'success');
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+async function deleteFolder(col, folder) {
+  if (!confirm(`Delete folder "${folder.name}" and all its mocks?`)) return;
+  try {
+    await colFetch(`/${col.id}/folders/${folder.id}`, { method: 'DELETE' });
+    await loadMocks();
+    toast('Folder deleted', 'success');
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Mock item actions                                                         */
+/* -------------------------------------------------------------------------- */
+
+async function deleteMockItem(col, mock) {
+  if (!confirm(`Delete mock "${mock.name || 'Untitled'}"?`)) return;
+  try {
+    await colFetch(`/${col.id}/mocks/${mock.id}`, { method: 'DELETE' });
+    if (_selectedId === mock.id) { _selectedId = null; showEmpty(); }
+    await loadMocks();
+    toast('Mock deleted', 'success');
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+async function duplicateMock(col, mock, folderId) {
+  const { id, createdAt, updatedAt, stats, ...rest } = mock;
+  rest.name = (rest.name || 'Untitled') + ' (copy)';
+  rest.folderId = folderId || undefined;
+  try {
+    await colFetch(`/${col.id}/mocks`, { method: 'POST', body: JSON.stringify(rest) });
+    await loadMocks();
+    toast('Mock duplicated', 'success');
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+async function showMoveDialog(col, mock) {
+  // Build a list of all folders in this collection
+  const full = await colFetch(`/${col.id}`).catch(() => null);
+  if (!full) return;
+  const folders = [];
+  function collectFolders(items, depth) {
+    for (const item of (items || [])) {
+      if (item.type === 'folder') {
+        folders.push({ id: item.id, name: '  '.repeat(depth) + item.name });
+        collectFolders(item.items, depth + 1);
+      }
+    }
+  }
+  collectFolders(full.items, 0);
+
+  const options = ['(collection root)', ...folders.map(f => f.name)];
+  const choice  = prompt(`Move "${mock.name}" to:\n${options.map((o,i) => `${i}: ${o}`).join('\n')}\n\nEnter number:`);
+  if (choice === null) return;
+  const idx = parseInt(choice, 10);
+  if (isNaN(idx) || idx < 0 || idx > folders.length) return;
+  const targetFolderId = idx === 0 ? null : folders[idx - 1].id;
+  try {
+    await colFetch(`/${col.id}/mocks/${mock.id}/move`, { method: 'PUT', body: JSON.stringify({ targetFolderId }) });
+    await loadMocks();
+    toast('Mock moved', 'success');
+  } catch (err) { toast('Failed: ' + err.message, 'error'); }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  filteredMocks — for export + AI context                                  */
+/* -------------------------------------------------------------------------- */
+
+function filteredMocks() {
+  const all = [];
+  for (const col of _collections) {
+    if (col._full) all.push(...flattenItems(col._full.items || []));
+  }
+  if (_searchQuery) {
+    const q = _searchQuery.toLowerCase();
+    return all.filter(m =>
+      (m.name || '').toLowerCase().includes(q) ||
+      (m.request?.url || '').toLowerCase().includes(q)
+    );
+  }
+  return all;
 }
 
 /* -------------------------------------------------------------------------- */
 /*  Editor builder                                                            */
 /* -------------------------------------------------------------------------- */
 
-function buildEditor(draft) {
+function buildEditor(draft, colId, folderId) {
+  // Store context for save
+  draft._colId    = colId;
+  draft._folderId = folderId;
   document.getElementById('editorEmpty').classList.add('hidden');
   const form = document.getElementById('editorForm');
   form.classList.remove('hidden');
@@ -596,8 +1099,7 @@ function buildEditor(draft) {
   // Body editor
   respSec.appendChild(el('label', { className: 'form-label', textContent: 'Response Body' }));
   const { wrap: edWrap, textarea: bodyArea, updateLN, applyHL } = buildJsonEditor(draft.response.body || '{}');
-  bodyArea.addEventListener('input', e => { draft.response.body = e.target.value; updateLN(); });
-  bodyArea.addEventListener('blur', () => applyHL());
+  bodyArea.addEventListener('input', e => { draft.response.body = e.target.value; updateLN(); applyHL(); });
   respSec.appendChild(edWrap);
 
   form.appendChild(respSec);
@@ -606,20 +1108,32 @@ function buildEditor(draft) {
   const footer = el('div', { className: 'form-footer' });
   const errEl  = el('div', { className: 'form-error hidden', id: 'formError' });
   const cancelBtn = el('button', { className: 'btn btn-ghost' }); cancelBtn.textContent = 'Cancel';
-  cancelBtn.addEventListener('click', () => { _selectedId = null; _draft = null; showEmpty(); renderMockList(); });
+  cancelBtn.addEventListener('click', () => { _selectedId = null; _draft = null; showEmpty(); renderSidebar(); });
   const saveBtn = el('button', { className: 'btn btn-primary' }); saveBtn.textContent = 'Save Mock';
   saveBtn.addEventListener('click', async () => {
     rebuildRespHdrs();
     if (!draft.name.trim()) { showFormError('Please enter a mock name.'); return; }
     saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    const cid = draft._colId;
+    const fid = draft._folderId;
     try {
-      const saved = draft.id
-        ? await apiFetch(`/mocks/${draft.id}`, { method: 'PUT', body: JSON.stringify(draft) })
-        : await apiFetch('/mocks', { method: 'POST', body: JSON.stringify(draft) });
-      _selectedId = saved.id;
-      await loadMocks();
-      selectMock(saved.id);
-      toast('Mock saved', 'success');
+      let saved;
+      if (draft.id && cid) {
+        saved = await colFetch(`/${cid}/mocks/${draft.id}`, { method: 'PUT', body: JSON.stringify(draft) });
+      } else if (cid) {
+        saved = await colFetch(`/${cid}/mocks`, { method: 'POST', body: JSON.stringify({ ...draft, folderId: fid || undefined }) });
+      }
+      if (saved) {
+        _selectedId = saved.id;
+        await loadMocks();
+        // Re-select after reload
+        const col = _collections.find(c => c.id === cid);
+        if (col?._full) {
+          const m = findMockInTree(col._full.items, saved.id);
+          if (m) selectMock(m, col, cid, fid);
+        }
+        toast('Mock saved', 'success');
+      }
     } catch (err) {
       showFormError('Save failed: ' + err.message);
       saveBtn.disabled = false; saveBtn.textContent = 'Save Mock';
@@ -772,20 +1286,38 @@ function renderBodyPatterns(container, patterns) {
 /*  Import / Export                                                           */
 /* -------------------------------------------------------------------------- */
 
+function downloadJson(mocks, label) {
+  const blob = new Blob([JSON.stringify(mocks, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `mocxy-${label}-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 async function exportMocks() {
-  try {
-    const mocks = await apiFetch('/mocks/export');
-    const blob  = new Blob([JSON.stringify(mocks, null, 2)], { type: 'application/json' });
-    const url   = URL.createObjectURL(blob);
-    const a     = document.createElement('a');
-    a.href      = url;
-    a.download  = `mocxy-mocks-${new Date().toISOString().slice(0,10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast(`Exported ${mocks.length} mocks`, 'success');
-  } catch (err) { toast('Export failed: ' + err.message, 'error'); }
+  // If a filter/search is active, offer to export filtered subset
+  const visible = filteredMocks();
+  const all     = _mocks;
+  const isFiltered = visible.length !== all.length;
+
+  if (isFiltered) {
+    const choice = confirm(
+      `Export options:\n\nOK = Export visible mocks (${visible.length})\nCancel = Export all mocks (${all.length})`
+    );
+    const toExport = choice ? visible : all;
+    downloadJson(toExport, choice ? 'filtered' : 'all');
+    toast(`Exported ${toExport.length} mock(s)`, 'success');
+  } else {
+    try {
+      const mocks = await apiFetch('/mocks/export');
+      downloadJson(mocks, 'all');
+      toast(`Exported ${mocks.length} mock(s)`, 'success');
+    } catch (err) { toast('Export failed: ' + err.message, 'error'); }
+  }
 }
 
 async function importMocks(file) {
@@ -869,8 +1401,15 @@ function applyMethodColor(sel) {
 /* -------------------------------------------------------------------------- */
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Initial load
   loadMocks();
+  checkAiKey();       // check LLM key on load
+  initSpecDialog();   // set up OpenAPI import dialog
+
+  // Browser back/forward
+  window.addEventListener('hashchange', () => {
+    const hash = window.location.hash.slice(1);
+    if (!hash) { _selectedId = null; _draft = null; showEmpty(); renderSidebar(); }
+  });
 
   // AI panel
   initAiPanel();
@@ -878,47 +1417,87 @@ document.addEventListener('DOMContentLoaded', () => {
   // Auto-refresh every 15s
   setInterval(loadMocks, 15000);
 
-  // New mock buttons
-  document.getElementById('newMockBtn').addEventListener('click', newMock);
-  document.getElementById('emptyNewBtn').addEventListener('click', newMock);
+  // New Collection button (topbar)
+  document.getElementById('newMockBtn').addEventListener('click', async () => {
+    const name = prompt('Collection name:', 'New Collection');
+    if (!name) return;
+    try {
+      const col = await colFetch('/', { method: 'POST', body: JSON.stringify({ name }) });
+      _expanded[col.id] = new Set(['__root__']);
+      await loadMocks();
+      toast('Collection created', 'success');
+    } catch (err) { toast('Failed: ' + err.message, 'error'); }
+  });
 
-  // Export
-  document.getElementById('exportBtn').addEventListener('click', exportMocks);
+  document.getElementById('emptyNewBtn').addEventListener('click', async () => {
+    const name = prompt('Collection name:', 'New Collection');
+    if (!name) return;
+    try {
+      const col = await colFetch('/', { method: 'POST', body: JSON.stringify({ name }) });
+      _expanded[col.id] = new Set(['__root__']);
+      await loadMocks();
+      toast('Collection created', 'success');
+    } catch (err) { toast('Failed: ' + err.message, 'error'); }
+  });
 
-  // Import
+  // Export — exports all collections or a selected one
+  document.getElementById('exportBtn').addEventListener('click', async () => {
+    if (_selectedColId) {
+      const col = _collections.find(c => c.id === _selectedColId);
+      if (col) { await exportCol(col); return; }
+    }
+    // Export all collections
+    try {
+      const all = await colFetch('/');
+      downloadJson(all, 'all-collections');
+      toast(`Exported ${all.length} collection(s)`, 'success');
+    } catch (err) { toast('Export failed: ' + err.message, 'error'); }
+  });
+
+  // Import — import a collection JSON
   document.getElementById('importBtn').addEventListener('click', () => {
     document.getElementById('importFile').click();
   });
-  document.getElementById('importFile').addEventListener('change', e => {
-    importMocks(e.target.files[0]);
+  document.getElementById('importFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
     e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const data   = JSON.parse(ev.target.result);
+        const list   = Array.isArray(data) ? data : [data];
+        for (const col of list) {
+          await colFetch('/import', { method: 'POST', body: JSON.stringify(col) });
+        }
+        await loadMocks();
+        toast(`Imported ${list.length} collection(s)`, 'success');
+      } catch (err) { toast('Import failed: ' + err.message, 'error'); }
+    };
+    reader.readAsText(file);
   });
 
-  // Delete all
+  // Delete all collections
   document.getElementById('deleteAllBtn').addEventListener('click', async () => {
-    if (!confirm(`Delete all ${_mocks.length} mocks? This cannot be undone.`)) return;
+    if (!confirm(`Delete ALL collections and mocks? This cannot be undone.`)) return;
     try {
-      await apiFetch('/mocks', { method: 'DELETE' });
-      _selectedId = null; _draft = null;
+      for (const col of _collections) {
+        await colFetch(`/${col.id}`, { method: 'DELETE' }).catch(() => {});
+      }
+      _selectedId = null; _selectedColId = null; _draft = null;
       await loadMocks();
       showEmpty();
-      toast('All mocks deleted', 'success');
+      toast('All collections deleted', 'success');
     } catch (err) { toast('Failed: ' + err.message, 'error'); }
   });
 
   // Search
   document.getElementById('searchInput').addEventListener('input', e => {
     _searchQuery = e.target.value;
-    renderMockList();
+    renderSidebar();
   });
 
-  // Method filters
-  document.getElementById('methodFilters').addEventListener('click', e => {
-    const btn = e.target.closest('.filter-btn');
-    if (!btn) return;
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    _filterMethod = btn.dataset.method;
-    renderMockList();
-  });
+  // Remove method filter bar (not needed for tree view)
+  const mf = document.getElementById('methodFilters');
+  if (mf) mf.style.display = 'none';
 });

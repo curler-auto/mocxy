@@ -1,0 +1,30 @@
+{
+  "id": "cd4bde0c-cc0b-4b8c-9c04-75e22a3184c2",
+  "name": "Mock1",
+  "priority": 0,
+  "enabled": true,
+  "request": {
+    "method": "ANY",
+    "urlMatchType": "contains",
+    "url": "sample",
+    "queryParams": [],
+    "headers": [],
+    "bodyPatterns": []
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": "\n{\n    \"glossary\": {\n        \"title\": \"example glossary1\",\n\t\t\"GlossDiv\": {\n            \"title\": \"S\",\n\t\t\t\"GlossList\": {\n                \"GlossEntry\": {\n                    \"ID\": \"SGML\",\n\t\t\t\t\t\"SortAs\": \"SGML\",\n\t\t\t\t\t\"GlossTerm\": \"Standard Generalized Markup Language\",\n\t\t\t\t\t\"Acronym\": \"SGML\",\n\t\t\t\t\t\"Abbrev\": \"ISO 8879:1986\",\n\t\t\t\t\t\"GlossDef\": {\n                        \"para\": \"A meta-markup language, used to create markup languages such as DocBook.\",\n\t\t\t\t\t\t\"GlossSeeAlso\": [\"GML\", \"XML\"]\n                    },\n\t\t\t\t\t\"GlossSee\": \"markup\"\n                }\n            }\n        }\n    }\n}",
+    "delayMs": 0,
+    "delayJitter": 0,
+    "fault": "none"
+  },
+  "stats": {
+    "matched": 1,
+    "lastMatchedAt": "2026-04-07T10:02:27.719Z"
+  },
+  "createdAt": "2026-04-07T10:01:59.949Z",
+  "updatedAt": "2026-04-07T12:11:34.931Z"
+}

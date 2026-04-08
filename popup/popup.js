@@ -23,9 +23,8 @@ const MSG_TYPES = {
 
 const $toggleInput       = document.getElementById('toggleInput');
 const $activeRulesCount  = document.getElementById('activeRulesCount');
+const $activeMocksCount  = document.getElementById('activeMocksCount');
 const $interceptedCount  = document.getElementById('interceptedCount');
-const $requestList       = document.getElementById('requestList');
-const $emptyState        = document.getElementById('emptyState');
 const $optionsLink       = document.getElementById('optionsLink');
 const $clearLogsLink     = document.getElementById('clearLogsLink');
 
@@ -88,66 +87,13 @@ function renderToggle(enabled) {
 /**
  * Update the stats counters.
  * @param {number} activeRules
+ * @param {number} activeMocks
  * @param {number} intercepted
  */
-function renderStats(activeRules, intercepted) {
+function renderStats(activeRules, activeMocks, intercepted) {
   $activeRulesCount.textContent = activeRules;
+  $activeMocksCount.textContent = activeMocks;
   $interceptedCount.textContent = intercepted;
-}
-
-/**
- * Render the recent intercepts list.
- * @param {Array} logs — array of log entry objects (newest first)
- */
-function renderLogs(logs) {
-  // Clear existing items (keep the empty state element)
-  $requestList.innerHTML = '';
-
-  if (!logs || logs.length === 0) {
-    const emptyLi = document.createElement('li');
-    emptyLi.className = 'request-empty';
-    emptyLi.id = 'emptyState';
-    emptyLi.textContent = 'No recent intercepts';
-    $requestList.appendChild(emptyLi);
-    return;
-  }
-
-  for (const entry of logs) {
-    const li = document.createElement('li');
-    li.className = 'request-item';
-
-    // Method badge
-    const method = (entry.method || 'GET').toUpperCase();
-    const methodBadge = document.createElement('span');
-    methodBadge.className = `method-badge method-${method}`;
-    methodBadge.textContent = method;
-
-    // Status code
-    const statusCode = document.createElement('span');
-    const code = entry.statusCode || 0;
-    statusCode.className = `status-code ${statusClass(code)}`;
-    statusCode.textContent = code || '--';
-
-    // URL
-    const urlSpan = document.createElement('span');
-    urlSpan.className = 'request-url';
-    urlSpan.textContent = truncateUrl(entry.url);
-    urlSpan.title = entry.url || '';
-
-    li.appendChild(methodBadge);
-    li.appendChild(statusCode);
-    li.appendChild(urlSpan);
-
-    // Intercepted indicator dot
-    if (entry.intercepted) {
-      const dot = document.createElement('span');
-      dot.className = 'intercepted-badge';
-      dot.title = 'Intercepted by rule';
-      li.appendChild(dot);
-    }
-
-    $requestList.appendChild(li);
-  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -164,25 +110,12 @@ async function refreshStatus() {
       renderToggle(status.enabled !== false);
       renderStats(
         status.activeRules || 0,
+        status.activeMocks || 0,
         status.interceptedCount || 0
       );
     }
   } catch (err) {
     console.warn('[Mocxy Popup] Failed to get status:', err);
-  }
-}
-
-/**
- * Fetch recent log entries and render them.
- */
-async function refreshLogs() {
-  try {
-    const response = await sendMsg(MSG_TYPES.GET_LOGS, { limit: 5 });
-    const logs = Array.isArray(response) ? response : (response?.logs || []);
-    renderLogs(logs);
-  } catch (err) {
-    console.warn('[Mocxy Popup] Failed to get logs:', err);
-    renderLogs([]);
   }
 }
 
@@ -214,11 +147,7 @@ $clearLogsLink.addEventListener('click', async (e) => {
   e.preventDefault();
   try {
     await sendMsg(MSG_TYPES.CLEAR_LOGS);
-    renderLogs([]);
-    renderStats(
-      parseInt($activeRulesCount.textContent, 10) || 0,
-      0
-    );
+    $interceptedCount.textContent = '0';
   } catch (err) {
     console.warn('[Mocxy Popup] Clear logs failed:', err);
   }
@@ -236,11 +165,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     renderToggle(changes.mocxy_enabled.newValue !== false);
   }
 
-  // If rules changed, refresh the active count
+  // If rules changed, refresh full status (safest way to re-calculate all counts)
   if (changes.mocxy_rules) {
-    const rules = changes.mocxy_rules.newValue || [];
-    const activeCount = rules.filter((r) => r.enabled !== false).length;
-    $activeRulesCount.textContent = activeCount;
+    refreshStatus();
   }
 });
 
@@ -250,5 +177,4 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 document.addEventListener('DOMContentLoaded', () => {
   refreshStatus();
-  refreshLogs();
 });

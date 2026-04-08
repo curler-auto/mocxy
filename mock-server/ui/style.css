@@ -289,6 +289,122 @@ html, body {
   color: var(--subtle);
 }
 
+/* ── Collection tree ─────────────────────────────────────────────────────── */
+
+.col-wrapper { border-bottom: 1px solid var(--border); }
+
+.col-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; cursor: pointer;
+  transition: background .12s; user-select: none;
+}
+.col-header:hover { background: var(--surface3); }
+
+.col-arrow {
+  font-size: 8px; color: var(--subtle); flex-shrink: 0;
+  width: 12px; transition: transform .15s; display: inline-block;
+}
+.col-arrow.open { transform: rotate(90deg); }
+
+.col-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: var(--border2);
+}
+.col-dot.active { background: var(--success); }
+
+.col-name {
+  flex: 1; font-size: 13px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.col-count {
+  font-size: 10px; color: var(--subtle);
+  background: var(--surface2); border-radius: 10px;
+  padding: 1px 6px; flex-shrink: 0;
+}
+
+.col-menu-btn {
+  background: none; border: none; color: var(--subtle);
+  cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1;
+  border-radius: 3px; opacity: 0; transition: opacity .12s;
+  flex-shrink: 0; font-family: inherit;
+}
+.col-header:hover .col-menu-btn,
+.folder-row:hover .col-menu-btn,
+.mock-row:hover .col-menu-btn { opacity: 1; }
+.col-menu-btn:hover { background: var(--surface3); color: var(--text); }
+
+.col-items { background: var(--bg); }
+
+/* Folders */
+.folder-wrapper { border-bottom: 1px solid var(--border); }
+
+.folder-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px 6px 22px; cursor: pointer;
+  transition: background .12s; user-select: none;
+}
+.folder-row:hover { background: var(--surface3); }
+
+.folder-arrow {
+  font-size: 8px; color: var(--subtle); flex-shrink: 0;
+  width: 10px; transition: transform .15s; display: inline-block;
+}
+.folder-arrow.open { transform: rotate(90deg); }
+.folder-icon { font-size: 12px; flex-shrink: 0; }
+.folder-name { flex: 1; font-size: 12px; color: var(--muted); font-weight: 500; }
+
+.folder-children { background: var(--bg); }
+
+/* Mocks in tree */
+.mock-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px 6px 34px; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background .12s;
+}
+.mock-row:hover { background: var(--surface3); }
+.mock-row.active {
+  background: rgba(0,144,240,.08);
+  border-left: 3px solid var(--accent);
+  padding-left: 31px;
+}
+.mock-row-info { flex: 1; min-width: 0; }
+
+/* Mocks that are direct children of folders get extra indent */
+.folder-children .mock-row { padding-left: 44px; }
+.folder-children .mock-row.active { padding-left: 41px; }
+.folder-children .folder-children .mock-row { padding-left: 54px; }
+
+.tree-empty, .tree-loading {
+  font-size: 11px; color: var(--subtle); font-style: italic;
+  padding: 6px 10px 6px 28px;
+}
+
+/* Context menu */
+.ctx-menu {
+  position: fixed; z-index: 9999;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  min-width: 160px;
+  padding: 4px 0;
+  animation: ctxIn .1s ease;
+}
+@keyframes ctxIn { from { opacity:0; transform:scale(.96); } to { opacity:1; transform:scale(1); } }
+
+.ctx-item {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; color: var(--text);
+  font-size: 12px; padding: 7px 14px; cursor: pointer;
+  transition: background .1s; font-family: inherit;
+}
+.ctx-item:hover { background: var(--surface3); }
+.ctx-item.danger { color: var(--error); }
+.ctx-item.danger:hover { background: rgba(244,112,103,.1); }
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
 /* Method badge colors */
 .badge-any     { background: rgba(90,90,90,0.15);    color: #a0a0a0; }
 .badge-get     { background: rgba(62,201,167,0.12);  color: #3ec9a7; }
@@ -518,13 +634,14 @@ html, body {
   white-space: pre-wrap; word-wrap: break-word;
   pointer-events: none; overflow: auto; color: var(--text);
 }
-.json-editor-inner { flex: 1; position: relative; overflow: hidden; }
+.json-editor-inner { flex: 1; position: relative; overflow: auto; }
 .json-textarea {
   position: absolute; inset: 0; background: transparent; border: none;
   color: transparent; caret-color: var(--text);
   font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
   padding: 10px 12px; resize: none; outline: none; overflow: auto;
   white-space: pre-wrap; z-index: 1;
+  pointer-events: auto; user-select: text; -webkit-user-select: text;
 }
 
 /* JSON token colors — VS Code Dark+ */
@@ -557,6 +674,60 @@ html, body {
   animation: errIn 0.2s ease;
 }
 @keyframes errIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+
+/* ── Import spec dialog ──────────────────────────────────────────────────── */
+
+.dialog-backdrop {
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+}
+
+.dialog-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 460px; max-width: 95vw;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+  animation: ctxIn .15s ease;
+}
+
+.dialog-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
+}
+.dialog-title { font-size: 14px; font-weight: 600; color: var(--text); }
+
+.dialog-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+
+.dialog-field { display: flex; flex-direction: column; gap: 6px; }
+.dialog-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.dialog-hint  { font-size: 11px; color: var(--subtle); line-height: 1.5; margin-top: 4px; }
+
+.spec-file-row { display: flex; align-items: center; gap: 8px; }
+.spec-filename {
+  flex: 1; font-size: 12px; color: var(--muted);
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 6px 10px; font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.scenarios-label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text); cursor: pointer;
+  font-weight: 500;
+}
+.scenarios-cb { accent-color: var(--accent); }
+.scenarios-cb:disabled { opacity: 0.4; cursor: not-allowed; }
+.scenarios-hint {
+  font-size: 11px; color: var(--subtle);
+  font-weight: 400;
+}
+
+.dialog-footer {
+  display: flex; justify-content: flex-end; gap: 8px;
+  padding: 12px 18px; border-top: 1px solid var(--border);
+}
 
 /* ── AI button ───────────────────────────────────────────────────────────── */
 

@@ -1503,3 +1503,8 @@ body.disabled .sidebar-nav {
   opacity: 0.5;
   pointer-events: none;
 }
+
+/* Full-height sections (Mock Collections) — no padding, editor fills the space */
+.content-section--full        { padding: 0; display: none; flex-direction: column; overflow: hidden; }
+.content-section--full.active { display: flex; }
+
