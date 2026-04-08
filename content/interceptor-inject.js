@@ -514,13 +514,25 @@
           try {
             const parsed = new URL(url);
             parsed.host = redirectCfg.targetHost;
+            // Apply protocol override before building newUrl
+            if (redirectCfg.protocol === 'http')  parsed.protocol = 'http:';
+            if (redirectCfg.protocol === 'https') parsed.protocol = 'https:';
             newUrl = parsed.toString();
           } catch (e) {
-            // If URL parsing fails, try string replacement
             newUrl = url.replace(/\/\/[^/]+/, '//' + redirectCfg.targetHost);
           }
         } else if (redirectCfg.targetHost) {
           newUrl = redirectCfg.targetHost;
+        }
+        // Apply protocol override when targetHost is not set (protocol-only switch)
+        if (redirectCfg.protocol === 'http' || redirectCfg.protocol === 'https') {
+          try {
+            const parsed = new URL(newUrl);
+            if (parsed.protocol !== redirectCfg.protocol + ':') {
+              parsed.protocol = redirectCfg.protocol + ':';
+              newUrl = parsed.toString();
+            }
+          } catch (_) {}
         }
         console.log('[Mocxy] Redirect:', url, '->', newUrl);
         // Apply payload injection if enabled
@@ -1007,12 +1019,21 @@
           try {
             const p = new URL(url);
             p.host = cfg.targetHost;
+            if (cfg.protocol === 'http')  p.protocol = 'http:';
+            if (cfg.protocol === 'https') p.protocol = 'https:';
             newUrl = p.toString();
           } catch (e) {
             newUrl = url.replace(/\/\/[^/]+/, '//' + cfg.targetHost);
           }
         } else if (cfg.targetHost) {
           newUrl = cfg.targetHost;
+        }
+        // Protocol-only switch (no targetHost change)
+        if (cfg.protocol === 'http' || cfg.protocol === 'https') {
+          try {
+            const p = new URL(newUrl);
+            if (p.protocol !== cfg.protocol + ':') { p.protocol = cfg.protocol + ':'; newUrl = p.toString(); }
+          } catch (_) {}
         }
       } else {
         const cfg = matchedRule.action.rewrite || {};

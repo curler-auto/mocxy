@@ -12,8 +12,10 @@
 
 import express from 'express';
 import cors from 'cors';
+import https from 'https';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { getCerts } from './certs.js';
 import {
   load, getAll, getById, create, update, remove, removeAll, importAll, reload,
 } from './store.js';
@@ -36,10 +38,11 @@ import { parseSpec, prepareScenarios, applyScenarios } from './openapi-parser.js
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const app     = express();
-const PORT    = parseInt(process.env.PORT || '5000', 10);
-const VERSION = '1.0.1';
-const START   = Date.now();
+const app        = express();
+const PORT       = parseInt(process.env.PORT       || '5000', 10);
+const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '5443', 10);
+const VERSION    = '1.0.1';
+const START      = Date.now();
 
 /* -------------------------------------------------------------------------- */
 /*  Middleware                                                                */
@@ -512,6 +515,7 @@ await load();
 await loadCollections();
 await loadConfig();
 
+// ── HTTP ──────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`
   ██████████████████████████████████████████
@@ -520,10 +524,22 @@ app.listen(PORT, () => {
   ██                                      ██
   ██████████████████████████████████████████
 
-  Listening  →  http://localhost:${PORT}
-  Admin API  →  http://localhost:${PORT}/mocxy/admin
-  Health     →  http://localhost:${PORT}/mocxy/admin/health
+  HTTP   →  http://localhost:${PORT}
+  HTTPS  →  https://localhost:${HTTPS_PORT}  (self-signed)
+  Admin  →  http://localhost:${PORT}/mocxy/admin
+  Health →  http://localhost:${PORT}/mocxy/admin/health
 
   Press Ctrl+C to stop
 `);
 });
+
+// ── HTTPS ─────────────────────────────────────────────────────────────────
+try {
+  const tlsCreds = getCerts();
+  https.createServer(tlsCreds, app).listen(HTTPS_PORT, () => {
+    console.log(`  [TLS] HTTPS server ready on https://localhost:${HTTPS_PORT}`);
+  });
+} catch (err) {
+  console.warn(`  [TLS] Could not start HTTPS server: ${err.message}`);
+  console.warn(`  [TLS] HTTP-only mode — set TLS_CERT + TLS_KEY env vars for custom certs`);
+}

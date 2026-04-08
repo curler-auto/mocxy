@@ -671,7 +671,9 @@ function buildMockForm(draft) {
       }
       if (saved) {
         _selectedId = saved.id;
-        col._full   = null; // invalidate cache
+        // Invalidate the full-tree cache for this collection so it re-fetches on next expand
+        const colObj = _collections.find(c => c.id === cid);
+        if (colObj) colObj._full = null;
         await loadCollections();
         render();
         showToastMsg('Mock saved', 'success');

@@ -506,6 +506,19 @@ function _subRedirect() {
   preserveCb.checked = _editingRule?.action?.redirect?.preservePath !== false;
   div.appendChild(_row('Preserve Path', preserveCb));
 
+  // Protocol override
+  const protoSel = el('select', { id: 'rf-redirect-protocol', className: 'rf-select' });
+  [
+    { value: 'auto',  label: 'Auto — keep original protocol' },
+    { value: 'http',  label: 'Force HTTP' },
+    { value: 'https', label: 'Force HTTPS' },
+  ].forEach(({ value, label }) => {
+    const opt = el('option', { value, textContent: label });
+    if ((_editingRule?.action?.redirect?.protocol || 'auto') === value) opt.selected = true;
+    protoSel.appendChild(opt);
+  });
+  div.appendChild(_row('Protocol', protoSel));
+
   // Additional Headers
   const hdrsBar = el('div', { className: 'rf-row-between' });
   hdrsBar.style.marginTop = '10px';
@@ -1107,6 +1120,7 @@ function _collectRule() {
   rule.action.type = _val('rf-action-type');
   rule.action.redirect.targetHost        = _val('rf-redirect-host');
   rule.action.redirect.preservePath      = _checked('rf-redirect-preserve');
+  rule.action.redirect.protocol          = _val('rf-redirect-protocol') || 'auto';
   rule.action.redirect.additionalHeaders = _collectKvAsArray('rf-redirect-headers-list');
   rule.action.redirect.injectPayload     = _collectPayloadSection('redir');
 

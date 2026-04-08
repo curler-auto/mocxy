@@ -1,0 +1,43 @@
+{
+  "id": "c32e0ce3-672f-4192-85b0-ba81e93dc2ee",
+  "name": "NMS Mock",
+  "description": "",
+  "enabled": true,
+  "items": [
+    {
+      "type": "mock",
+      "id": "89756e07-3509-4cb0-a2b5-a1104b744189",
+      "name": "Fleet Summary",
+      "priority": 0,
+      "enabled": true,
+      "request": {
+        "method": "POST",
+        "urlMatchType": "contains",
+        "url": "/neuron-api/visualization/api/fleet-summary/get-metrics/v3",
+        "queryParams": [],
+        "headers": [],
+        "bodyPatterns": []
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\n    \"activeTailCountDiff\": 0,\n    \"noSignalCount\": 0,\n    \"noSignalCountDiff\": 0,\n    \"criticalCount\": 2,\n    \"criticalCountDiff\": 0,\n    \"warningCount\": 0,\n    \"warningCountDiff\": 0,\n    \"goodCount\": 0,\n    \"goodCountDiff\": 0,\n    \"dssErrorCount\": 0,\n    \"updateDelayedCount\": null,\n    \"averageTailList\": [\n        {\n            \"site.code\": \"3095\",\n            \"site.name\": \"N395DZ\",\n            \"site.key_site_type_id\": \"2\",\n            \"site.custom_string_4\": \"A-321\",\n            \"site.custom_string_1_hist\": \"A321\",\n            \"site.custom_string_3_hist\": \"321\",\n            \"group.name\": \"Delta Air Lines 1\",\n            \"eqoemin.qoe_score\": 80.46087047031948,\n            \"eqoemin.web_qoe_score\": 81.34957177298409,\n            \"eqoemin.packet_loss\": 0.5952500104904175,\n            \"eqoemin.availability\": 100.0,\n            \"eqoemin.packet_loss_up\": 0.23810714483261108,\n            \"eqoemin.packet_loss_down\": 0.35714285714285715,\n            \"eqoemin.rtt_ms\": 769.1046098981585,\n            \"eqoemin.jitter_ms\": 62.38282108306885,\n            \"eqoemin.jitter_up_ms\": 52.015749386378694,\n            \"eqoemin.jitter_down_ms\": 10.399250115667071,\n            \"eqoemin.queue_depth\": 38.54803604739053,\n            \"eqoemin.dns_ms\": 103.87053571428571,\n            \"eqoemin.tcp_ms\": 12.949035772255488,\n            \"eqoemin.tls_ms\": 1035.8359636579241,\n            \"eqoemin.ttfb_ms\": 860.0237448556082,\n            \"eqoemin.total_ms\": 2061.9401027134486,\n            \"sitemin.heading\": 100.0,\n            \"sitemin.lat\": 46.0064582824707,\n            \"sitemin.long\": -98.44806671142578,\n            \"sitemin.elevation\": 36000,\n            \"sitemin.trip_active\": true,\n            \"site.tail_status\": \"CRITICAL\",\n            \"trip.dep_point_code\": \"PDX\",\n            \"trip.arr_point_code\": \"DTW\",\n            \"trip.dep_datetime_B\": \"1775630655\",\n            \"trip.dep_datetime_A\": \"1775629920\",\n            \"trip.estimated_in\": \"1775644260\",\n            \"trip.system_id\": \"DAL913-1775456901-schedule-706p\",\n            \"trip.key_trip_id\": \"96f0184e-e98d-147c-d2de-11705eb147a1\",\n            \"sitemin.speed\": 526.3214285714286,\n            \"sitemin.door\": \"closed\",\n            \"site.key_provider_id\": \"Viasat\"\n        },\n        {\n            \"site.code\": \"3310\",\n            \"site.name\": \"N810NW\",\n            \"site.key_site_type_id\": \"2\",\n            \"site.custom_string_4\": \"A-330-300\",\n            \"site.custom_string_1_hist\": \"A330\",\n            \"site.custom_string_3_hist\": \"333\",\n            \"group.name\": \"Delta Air Lines 1\",\n            \"eqoemin.qoe_score\": 80.33421434674945,\n            \"eqoemin.web_qoe_score\": 80.33421434674945,\n            \"eqoemin.packet_loss\": 0.11907143252236503,\n            \"eqoemin.availability\": 100.0,\n            \"eqoemin.packet_loss_up\": 0.11907143252236503,\n            \"eqoemin.packet_loss_down\": 0.0,\n            \"eqoemin.rtt_ms\": 849.2942134312221,\n            \"eqoemin.jitter_ms\": 44.66675002234323,\n            \"eqoemin.jitter_up_ms\": 36.17785712650844,\n            \"eqoemin.jitter_down_ms\": 9.978892888341631,\n            \"eqoemin.queue_depth\": 26.427499992506846,\n            \"eqoemin.dns_ms\": 105.08596427100045,\n            \"eqoemin.tcp_ms\": 10.766321446214404,\n            \"eqoemin.tls_ms\": 1074.453641619001,\n            \"eqoemin.ttfb_ms\": 898.8508213588169,\n            \"eqoemin.total_ms\": 2137.083958217076,\n            \"sitemin.heading\": 108.0,\n            \"sitemin.lat\": 51.79117965698242,\n            \"sitemin.long\": -6.562580108642578,\n            \"sitemin.elevation\": 35000,\n            \"sitemin.trip_active\": true,\n            \"site.tail_status\": \"CRITICAL\",\n            \"trip.dep_point_code\": \"ATL\",\n            \"trip.arr_point_code\": \"CDG\",\n            \"trip.dep_datetime_B\": \"1775615614\",\n            \"trip.dep_datetime_A\": \"1775614980\",\n            \"trip.estimated_in\": \"1775642280\",\n            \"trip.system_id\": \"DAL84-1775362386-fa-131p\",\n            \"trip.key_trip_id\": \"13463339-67fa-38b7-5ca5-c830cbd32ae5\",\n            \"sitemin.speed\": 485.10714285714283,\n            \"site.key_provider_id\": \"Viasat\"\n        }\n    ],\n    \"firstTailList\": null,\n    \"lastTailList\": null,\n    \"eqoemin.total_tails_count\": 2,\n    \"eqoemin.active_tails_count\": 2\n}",
+        "delayMs": 0,
+        "delayJitter": 0,
+        "fault": "none"
+      },
+      "stats": {
+        "matched": 1,
+        "lastMatchedAt": "2026-04-08T08:56:00.102Z"
+      },
+      "createdAt": "2026-04-08T08:52:26.804Z",
+      "updatedAt": "2026-04-08T08:54:51.025Z",
+      "_colId": "c32e0ce3-672f-4192-85b0-ba81e93dc2ee",
+      "_folderId": null
+    }
+  ],
+  "createdAt": "2026-04-08T08:52:14.479Z",
+  "updatedAt": "2026-04-08T08:54:51.025Z"
+}

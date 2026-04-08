@@ -2,3 +2,4 @@ node_modules/
 mocks.json
 mocks.json.migrated
 .env
+certs/

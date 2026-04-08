@@ -30,6 +30,7 @@ export function createRule(overrides = {}) {
       redirect: {
         targetHost: '',
         preservePath: true,
+        protocol: 'auto',   // 'auto' | 'http' | 'https'
         additionalHeaders: [],
         injectPayload: { enabled: false, contentType: 'json', operation: 'replace', jsonPath: '', key: '', value: '', find: '' },
       },
