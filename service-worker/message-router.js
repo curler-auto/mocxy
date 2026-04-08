@@ -106,7 +106,10 @@ async function _route(message, _sender) {
 
       const activeRules = statusRules.filter((r) => r.enabled !== false);
       const mockActionTypes = ['mock_inline', 'mock_server', 'graphql_mock'];
-      const activeMocks = activeRules.filter((r) => mockActionTypes.includes(r.action?.type)).length;
+      // Count rules with mock action types + active local mock collections
+      const activeMockRules = activeRules.filter((r) => mockActionTypes.includes(r.action?.type)).length;
+      const activeColls     = statusCollections.filter((c) => c.active !== false && (c.mocks || []).length > 0).length;
+      const activeMocks     = activeMockRules + activeColls;
 
       return {
         enabled: statusEnabled,

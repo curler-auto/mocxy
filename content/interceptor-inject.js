@@ -781,19 +781,34 @@
       try {
         const result = await applyAction(matchedRule, url, mergedInit);
         const duration = performance.now() - startTime;
+        // Capture response headers and body (clone to avoid consuming stream)
+        let responseHeaders = {};
+        let responseBody    = null;
+        let responseToReturn = result.response;
+        try {
+          if (result.response) {
+            result.response.headers.forEach((v, k) => { responseHeaders[k] = v; });
+            const cloned = result.response.clone();
+            responseBody = await cloned.text().catch(() => null);
+          }
+        } catch (_) {}
+
         postLog({
           url,
-          modifiedUrl: result.rewrittenUrl || result.redirectedUrl || null,
+          modifiedUrl:     result.rewrittenUrl || result.redirectedUrl || null,
           method,
-          statusCode: result.response?.status,
-          duration: Math.round(duration),
-          matchedRuleId: matchedRule.id,
+          statusCode:      result.response?.status,
+          duration:        Math.round(duration),
+          matchedRuleId:   matchedRule.id,
           matchedRuleName: matchedRule.name,
-          actionTaken: matchedRule.action.type,
-          intercepted: true,
-          requestHeaders: headers,
+          actionTaken:     matchedRule.action.type,
+          intercepted:     true,
+          requestHeaders:  headers,
+          requestBody:     bodyStr,
+          responseHeaders: responseHeaders,
+          responseBody:    responseBody,
         });
-        return result.response;
+        return responseToReturn;
       } catch (err) {
         console.error('[Mocxy] Error applying rule "' + matchedRule.name + '" (' + matchedRule.action.type + '):', err.message);
         // Fall back to original but use mergedInit so Request body is preserved
@@ -817,15 +832,20 @@
         status: matchedMock.statusCode || 200,
         headers: matchedMock.responseHeaders || { 'Content-Type': 'application/json' },
       });
+      const mockRespHdrs = matchedMock.responseHeaders || { 'Content-Type': 'application/json' };
       postLog({
         url,
         method,
-        statusCode: resp.status,
-        duration: delay,
-        matchedRuleId: matchedMock.id,
+        statusCode:      resp.status,
+        duration:        delay,
+        matchedRuleId:   matchedMock.id,
         matchedRuleName: matchedMock.name,
-        actionTaken: 'mock_collection',
-        intercepted: true,
+        actionTaken:     'mock_collection',
+        intercepted:     true,
+        requestHeaders:  headers,
+        requestBody:     bodyStr,
+        responseHeaders: typeof mockRespHdrs === 'object' ? mockRespHdrs : {},
+        responseBody:    matchedMock.body || '{}',
       });
       return resp;
     }
