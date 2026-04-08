@@ -31,10 +31,12 @@ export function createRule(overrides = {}) {
         targetHost: '',
         preservePath: true,
         additionalHeaders: [],
+        injectPayload: { enabled: false, contentType: 'json', operation: 'replace', jsonPath: '', key: '', value: '', find: '' },
       },
       rewrite: {
         pattern: '',
         replacement: '',
+        injectPayload: { enabled: false, contentType: 'json', operation: 'replace', jsonPath: '', key: '', value: '', find: '' },
       },
       mockInline: {
         statusCode: 200,
@@ -45,6 +47,7 @@ export function createRule(overrides = {}) {
         serverUrl: 'http://localhost:5000/proxy',
         mode: 'RESPONSE_ONLY',
         stepTag: '',
+        injectPayload: { enabled: false, contentType: 'json', operation: 'replace', jsonPath: '', key: '', value: '', find: '' },
       },
       headerMods: {
         addRequest: [],
@@ -59,6 +62,14 @@ export function createRule(overrides = {}) {
       graphqlMock: { operationName: '', operationType: 'any', statusCode: 200, body: '{"data":{}}' },
       injectScript: { code: '', runAt: 'document_end' },
       injectCss:    { code: '' },
+      injectPayload: {
+        contentType: 'json',    // json | form | text
+        operation:   'replace', // replace | append | remove
+        jsonPath:    '',        // JSON replace/remove: path e.g. $.version
+        key:         '',        // JSON append: new key; form replace/append/remove: field name
+        value:       '',        // replace/append: new value (JSON literal or plain string)
+        find:        '',        // text replace/remove: substring to find
+      },
     },
   };
 

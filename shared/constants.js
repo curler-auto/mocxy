@@ -80,6 +80,21 @@ export const ACTION_TYPES = {
   GRAPHQL_MOCK: 'graphql_mock',
   INJECT_SCRIPT: 'inject_script',
   INJECT_CSS:    'inject_css',
+  INJECT_PAYLOAD: 'inject_payload',
+};
+
+/** Content types supported by the Inject Payload action. */
+export const INJECT_PAYLOAD_CONTENT_TYPES = {
+  JSON: 'json',
+  FORM: 'form',
+  TEXT: 'text',
+};
+
+/** Operations supported by the Inject Payload action. */
+export const INJECT_PAYLOAD_OPERATIONS = {
+  REPLACE: 'replace',
+  APPEND:  'append',
+  REMOVE:  'remove',
 };
 
 /** Preset user-agent strings for the Set User-Agent action. */

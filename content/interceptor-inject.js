@@ -383,6 +383,114 @@
   }
 
   // =========================================================================
+  // Payload injection helpers
+  // =========================================================================
+
+  /** Convert any body value to a plain string. */
+  function _bodyToString(body) {
+    if (!body) return '';
+    if (typeof body === 'string') return body;
+    if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
+    try { return JSON.stringify(body); } catch (_) { return String(body); }
+  }
+
+  /** Parse a string as a JSON value; fall back to the raw string if it fails. */
+  function _parseVal(str) {
+    if (str === undefined || str === null || str === '') return str;
+    try { return JSON.parse(str); } catch (_) { return str; }
+  }
+
+  /** Set value at a dot-notation path inside obj (mutates obj). */
+  function _setJsonPath(obj, path, value) {
+    const parts = path.replace(/^\$\.?/, '').split('.');
+    if (parts.length === 0 || (parts.length === 1 && parts[0] === '')) return;
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i];
+      if (cur[p] === null || cur[p] === undefined || typeof cur[p] !== 'object') {
+        cur[p] = {};
+      }
+      cur = cur[p];
+    }
+    cur[parts[parts.length - 1]] = value;
+  }
+
+  /** Remove the key at a dot-notation path from obj (mutates obj). */
+  function _removeJsonPath(obj, path) {
+    const parts = path.replace(/^\$\.?/, '').split('.');
+    if (parts.length === 0 || (parts.length === 1 && parts[0] === '')) return;
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i];
+      if (!cur || typeof cur !== 'object') return;
+      cur = cur[p];
+    }
+    if (cur && typeof cur === 'object') {
+      delete cur[parts[parts.length - 1]];
+    }
+  }
+
+  /**
+   * Apply inject_payload logic to a raw body string.
+   * Returns the transformed body string (original returned on any error).
+   */
+  function _applyPayloadInjection(rawBody, cfg) {
+    if (!cfg) return rawBody;
+    try {
+      switch (cfg.contentType) {
+        case 'json': {
+          const obj = JSON.parse(rawBody || '{}');
+          if (cfg.operation === 'replace' && cfg.jsonPath) {
+            _setJsonPath(obj, cfg.jsonPath, _parseVal(cfg.value));
+            console.log('[Mocxy] Inject payload – JSON replace:', cfg.jsonPath, '=', cfg.value);
+          } else if (cfg.operation === 'append' && cfg.key) {
+            _setJsonPath(obj, '$.' + cfg.key.replace(/^\$\.?/, ''), _parseVal(cfg.value));
+            console.log('[Mocxy] Inject payload – JSON append key:', cfg.key);
+          } else if (cfg.operation === 'remove' && cfg.jsonPath) {
+            _removeJsonPath(obj, cfg.jsonPath);
+            console.log('[Mocxy] Inject payload – JSON remove:', cfg.jsonPath);
+          }
+          return JSON.stringify(obj);
+        }
+        case 'form': {
+          const params = new URLSearchParams(rawBody || '');
+          if (cfg.operation === 'remove' && cfg.key) {
+            params.delete(cfg.key);
+          } else if (cfg.key) {
+            // replace → overwrite; append → add duplicate entry
+            if (cfg.operation === 'append') {
+              params.append(cfg.key, cfg.value || '');
+            } else {
+              params.set(cfg.key, cfg.value || '');
+            }
+          }
+          console.log('[Mocxy] Inject payload – form', cfg.operation, cfg.key);
+          return params.toString();
+        }
+        case 'text': {
+          if (cfg.operation === 'replace' && cfg.find) {
+            const result = rawBody.split(cfg.find).join(cfg.value || '');
+            console.log('[Mocxy] Inject payload – text replace "' + cfg.find + '"');
+            return result;
+          } else if (cfg.operation === 'append') {
+            console.log('[Mocxy] Inject payload – text append');
+            return rawBody + (cfg.value || '');
+          } else if (cfg.operation === 'remove' && cfg.find) {
+            console.log('[Mocxy] Inject payload – text remove "' + cfg.find + '"');
+            return rawBody.split(cfg.find).join('');
+          }
+          return rawBody;
+        }
+        default:
+          return rawBody;
+      }
+    } catch (err) {
+      console.warn('[Mocxy] Inject payload failed (' + (cfg.contentType || '?') + '):', err.message, '— original body preserved');
+      return rawBody;
+    }
+  }
+
+  // =========================================================================
   // Action execution
   // =========================================================================
 
@@ -415,13 +523,27 @@
           newUrl = redirectCfg.targetHost;
         }
         console.log('[Mocxy] Redirect:', url, '->', newUrl);
-        // Merge additional headers from rule config
+        // Apply payload injection if enabled
+        if (redirectCfg.injectPayload?.enabled) {
+          const rawBody = _bodyToString(options?.body);
+          const injected = _applyPayloadInjection(rawBody, redirectCfg.injectPayload);
+          options = { ...options, body: injected };
+        }
+        // Merge additional headers: override existing key (case-insensitive), add if new
         const additionalHdrs = redirectCfg.additionalHeaders || [];
         if (additionalHdrs.length > 0) {
-          options = { ...options, headers: { ...(options?.headers || {}) } };
+          const merged = { ...(options?.headers || {}) };
           additionalHdrs.forEach((h) => {
-            if (h.name) options.headers[h.name] = h.value;
+            if (!h.name) return;
+            // Remove any existing entry with same header name (case-insensitive)
+            for (const existing of Object.keys(merged)) {
+              if (existing.toLowerCase() === h.name.toLowerCase()) {
+                delete merged[existing];
+              }
+            }
+            merged[h.name] = h.value;
           });
+          options = { ...options, headers: merged };
         }
         const resp = await originalFetch(newUrl, options);
         return { response: resp, redirectedUrl: newUrl };
@@ -445,6 +567,12 @@
           return { response: await originalFetch(url, options) };
         }
         console.log('[Mocxy] Rewrite:', url, '->', newUrl);
+        // Apply payload injection if enabled
+        if (rewriteCfg.injectPayload?.enabled) {
+          const rawBody = _bodyToString(options?.body);
+          const injected = _applyPayloadInjection(rawBody, rewriteCfg.injectPayload);
+          options = { ...options, body: injected };
+        }
         const resp = await originalFetch(newUrl, options);
         return { response: resp, rewrittenUrl: newUrl };
       }
@@ -481,6 +609,12 @@
           };
         } else {
           // RESPONSE_ONLY or PASSTHROUGH - redirect to proxy server
+          // Apply payload injection if enabled
+          if (serverCfg.injectPayload?.enabled) {
+            const rawBody = _bodyToString(proxyOptions?.body);
+            const injected = _applyPayloadInjection(rawBody, serverCfg.injectPayload);
+            proxyOptions = { ...proxyOptions, body: injected };
+          }
           const parsed = new URL(url);
           const apiPath = parsed.pathname + parsed.search;
           const resp = await originalFetch(serverUrl + apiPath, proxyOptions);
@@ -567,6 +701,15 @@
           headers: { 'Content-Type': 'application/json' },
         });
         return { response, mocked: true };
+      }
+
+      case 'inject_payload': {
+        const cfg = action.injectPayload || {};
+        const rawBody = _bodyToString(options?.body);
+        const newBody = _applyPayloadInjection(rawBody, cfg);
+        const injectedOptions = { ...options, body: newBody };
+        const resp = await originalFetch(url, injectedOptions);
+        return { response: resp, payloadInjected: true };
       }
 
       default:
@@ -889,15 +1032,32 @@
         }
       }
       console.log('[Mocxy] XHR ' + matchedRule.action.type + ':', url, '->', newUrl);
+      // Apply payload injection for redirect or rewrite before sending
+      const xhrIpCfg = matchedRule.action.type === 'redirect'
+        ? matchedRule.action.redirect?.injectPayload
+        : matchedRule.action.rewrite?.injectPayload;
+      if (xhrIpCfg?.enabled) {
+        const rawBody = typeof body === 'string' ? body : _bodyToString(body);
+        body = _applyPayloadInjection(rawBody, xhrIpCfg);
+      }
       originalXHROpen.call(xhr, method, newUrl, true);
-      // Apply additional redirect headers
+      // Merge additional redirect headers (case-insensitive override):
+      // build a set of override keys so original headers are skipped when
+      // the same key is also in additionalHdrs — prevents XHR appending both values.
       const additionalHdrs = matchedRule.action.redirect?.additionalHeaders || [];
+      const overrideKeys   = new Set(
+        additionalHdrs.map(h => (h.name || '').toLowerCase()).filter(Boolean)
+      );
+      // Set original captured headers, skipping any that will be overridden
+      for (const [k, v] of Object.entries(headers)) {
+        if (!overrideKeys.has(k.toLowerCase())) {
+          originalXHRSetRequestHeader.call(xhr, k, v);
+        }
+      }
+      // Set additional headers — these override or add
       additionalHdrs.forEach((h) => {
         if (h.name) originalXHRSetRequestHeader.call(xhr, h.name, h.value);
       });
-      for (const [k, v] of Object.entries(headers)) {
-        originalXHRSetRequestHeader.call(xhr, k, v);
-      }
 
       const origOnLoad = xhr.onload;
       xhr.onload = function () {
@@ -1035,6 +1195,28 @@
         }, delay);
         return;
       }
+    }
+
+    // ----- inject_payload via rule -----
+    if (matchedRule && matchedRule.action.type === 'inject_payload') {
+      const cfg       = matchedRule.action.injectPayload || {};
+      const rawBody   = typeof body === 'string' ? body : _bodyToString(body);
+      const newBody   = _applyPayloadInjection(rawBody, cfg);
+      const origOnLoad = xhr.onload;
+      xhr.onload = function () {
+        postLog({
+          url,
+          method,
+          statusCode: xhr.status,
+          duration: Math.round(performance.now() - startTime),
+          matchedRuleId: matchedRule.id,
+          matchedRuleName: matchedRule.name,
+          actionTaken: 'inject_payload',
+          intercepted: true
+        });
+        if (origOnLoad) origOnLoad.call(xhr);
+      };
+      return originalXHRSend.call(xhr, newBody);
     }
 
     // ----- Passthrough with optional logging -----

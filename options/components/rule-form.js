@@ -338,6 +338,7 @@ function _buildActionSection() {
   sub.appendChild(_subGraphqlMock());
   sub.appendChild(_subInjectScript());
   sub.appendChild(_subInjectCss());
+  sub.appendChild(_subInjectPayload());
   sec.appendChild(sub);
 
   typeSelect.addEventListener('change', () => _toggleSub(typeSelect.value));
@@ -357,6 +358,142 @@ function _actionSub(type) {
   div.dataset.type = type;
   div.style.display = 'none';
   return div;
+}
+
+/**
+ * Build a reusable "Inject Payload" collapsible section for action sub-forms.
+ * @param {string} prefix   Unique prefix for element IDs (e.g. 'redir', 'rw', 'ms')
+ * @param {object} cfg      Existing injectPayload config from the rule being edited
+ */
+function _buildPayloadSection(prefix, cfg) {
+  const existing = cfg || {};
+  const wrap = el('div', { className: 'rf-payload-action-wrap' });
+
+  // Separator
+  const sep = el('div'); sep.style.cssText = 'border-top:1px solid var(--c-border);margin:12px 0 8px';
+  wrap.appendChild(sep);
+
+  // Enable toggle
+  const toggleBar = el('div', { className: 'rf-row-between' });
+  const toggleLbl = el('label', { className: 'rf-cb-label' });
+  const enableCb  = el('input', { type: 'checkbox', id: `rf-${prefix}-ip-enabled`, className: 'rf-checkbox' });
+  enableCb.checked = existing.enabled === true;
+  toggleLbl.appendChild(enableCb);
+  toggleLbl.appendChild(document.createTextNode(' Inject / Modify Payload'));
+  toggleBar.appendChild(toggleLbl);
+  wrap.appendChild(toggleBar);
+
+  // Fields (hidden until enabled)
+  const fields = el('div', { id: `rf-${prefix}-ip-fields` });
+  fields.style.display = existing.enabled ? 'block' : 'none';
+  fields.style.marginTop = '8px';
+
+  // Content type
+  const ctSel = el('select', { id: `rf-${prefix}-ip-ct`, className: 'rf-select' });
+  [['json','JSON'],['form','Form (urlencoded)'],['text','Text / Plain']].forEach(([v,l]) => {
+    const opt = el('option', { value: v, textContent: l });
+    if ((existing.contentType || 'json') === v) opt.selected = true;
+    ctSel.appendChild(opt);
+  });
+  fields.appendChild(_row('Content Type', ctSel));
+
+  // Operation
+  const opSel = el('select', { id: `rf-${prefix}-ip-op`, className: 'rf-select' });
+  [['replace','Replace'],['append','Append'],['remove','Remove']].forEach(([v,l]) => {
+    const opt = el('option', { value: v, textContent: l });
+    if ((existing.operation || 'replace') === v) opt.selected = true;
+    opSel.appendChild(opt);
+  });
+  fields.appendChild(_row('Operation', opSel));
+
+  // JSON Path (replace/remove)
+  const jpRow = el('div', { id: `rf-${prefix}-ip-jp-row` });
+  jpRow.appendChild(_row('JSON Path', el('input', {
+    type: 'text', id: `rf-${prefix}-ip-jsonpath`, className: 'rf-input',
+    placeholder: '$.version  or  $.user.role', value: existing.jsonPath || '',
+  })));
+  fields.appendChild(jpRow);
+
+  // Key (JSON append / Form field)
+  const keyRow = el('div', { id: `rf-${prefix}-ip-key-row` });
+  keyRow.appendChild(_row('Key / Field', el('input', {
+    type: 'text', id: `rf-${prefix}-ip-key`, className: 'rf-input',
+    placeholder: 'newField  or  username', value: existing.key || '',
+  })));
+  fields.appendChild(keyRow);
+
+  // Find text (text replace/remove)
+  const findRow = el('div', { id: `rf-${prefix}-ip-find-row` });
+  findRow.appendChild(_row('Find Text', el('input', {
+    type: 'text', id: `rf-${prefix}-ip-find`, className: 'rf-input',
+    placeholder: 'text to find', value: existing.find || '',
+  })));
+  fields.appendChild(findRow);
+
+  // Value (replace/append)
+  const valRow = el('div', { id: `rf-${prefix}-ip-val-row` });
+  const valLbl = el('label', { className: 'rf-label', id: `rf-${prefix}-ip-val-lbl`, textContent: 'New Value' });
+  const valIn  = el('input', { type: 'text', id: `rf-${prefix}-ip-value`, className: 'rf-input',
+    value: existing.value || '' });
+  valRow.appendChild(valLbl); valRow.appendChild(valIn);
+  fields.appendChild(valRow);
+
+  // Hint line
+  const hint = el('div', { id: `rf-${prefix}-ip-hint` });
+  hint.style.cssText = 'font-size:11px;color:var(--c-subtle);margin-top:3px';
+  fields.appendChild(hint);
+
+  function refresh() {
+    const ct = ctSel.value;
+    const op = opSel.value;
+    jpRow.style.display  = (ct === 'json' && (op === 'replace' || op === 'remove')) ? '' : 'none';
+    keyRow.style.display = (ct === 'json' && op === 'append') || ct === 'form' ? '' : 'none';
+    findRow.style.display = (ct === 'text' && (op === 'replace' || op === 'remove')) ? '' : 'none';
+    valRow.style.display  = op !== 'remove' ? '' : 'none';
+
+    // Dynamic label
+    valLbl.textContent = ct === 'text' && op === 'append' ? 'Append Text'
+      : ct === 'json' ? 'Value (JSON literal)' : 'Field Value';
+    valIn.placeholder  = ct === 'json' ? '"v4"  or  42  or  true' : 'value';
+
+    // Hint
+    const hints = {
+      json_replace: 'Sets $.path to the given JSON value. Creates missing nested objects.',
+      json_append:  'Adds a new key to the root JSON object.',
+      json_remove:  'Removes the key at $.path from the JSON body.',
+      form_replace: 'Sets the form field (adds it if not present).',
+      form_append:  'Adds a duplicate form field entry.',
+      form_remove:  'Removes all entries for the field.',
+      text_replace: 'Replaces ALL occurrences of the found text.',
+      text_append:  'Appends text to the end of the body.',
+      text_remove:  'Removes ALL occurrences of the found text.',
+    };
+    hint.textContent = hints[`${ct}_${op}`] || '';
+  }
+
+  ctSel.addEventListener('change', refresh);
+  opSel.addEventListener('change', refresh);
+  requestAnimationFrame(refresh);
+
+  enableCb.addEventListener('change', () => {
+    fields.style.display = enableCb.checked ? 'block' : 'none';
+  });
+
+  wrap.appendChild(fields);
+  return wrap;
+}
+
+/** Collect injectPayload config from a prefixed section. */
+function _collectPayloadSection(prefix) {
+  return {
+    enabled:     _checked(`rf-${prefix}-ip-enabled`),
+    contentType: _val(`rf-${prefix}-ip-ct`)        || 'json',
+    operation:   _val(`rf-${prefix}-ip-op`)        || 'replace',
+    jsonPath:    _val(`rf-${prefix}-ip-jsonpath`)  || '',
+    key:         _val(`rf-${prefix}-ip-key`)       || '',
+    find:        _val(`rf-${prefix}-ip-find`)      || '',
+    value:       _val(`rf-${prefix}-ip-value`)     || '',
+  };
 }
 
 function _subRedirect() {
@@ -392,6 +529,9 @@ function _subRedirect() {
     _appendKvRow(redirectHdrsList, h.name || '', h.value || '');
   });
 
+  // Inject Payload section
+  div.appendChild(_buildPayloadSection('redir', _editingRule?.action?.redirect?.injectPayload));
+
   return div;
 }
 
@@ -405,6 +545,10 @@ function _subRewrite() {
     type: 'text', id: 'rf-rewrite-replacement', className: 'rf-input',
     placeholder: '/new-path/$1', value: _editingRule?.action?.rewrite?.replacement || '',
   })));
+
+  // Inject Payload section
+  div.appendChild(_buildPayloadSection('rw', _editingRule?.action?.rewrite?.injectPayload));
+
   return div;
 }
 
@@ -471,6 +615,10 @@ function _subMockServer() {
     type: 'text', id: 'rf-ms-tag', className: 'rf-input',
     placeholder: 'step_tag', value: ms.stepTag || '',
   })));
+
+  // Inject Payload section
+  div.appendChild(_buildPayloadSection('ms', _editingRule?.action?.mockServer?.injectPayload));
+
   return div;
 }
 
@@ -717,6 +865,144 @@ function _subInjectCss() {
   return div;
 }
 
+function _subInjectPayload() {
+  const div = _actionSub(ACTION_TYPES.INJECT_PAYLOAD);
+  const cfg = _editingRule?.action?.injectPayload || {};
+
+  div.appendChild(el('div', {
+    style: 'font-size:11px;color:var(--c-info);margin-bottom:10px',
+    textContent: 'Modifies the outgoing request body before it is sent.',
+  }));
+
+  // Content type
+  const ctSel = el('select', { id: 'rf-ip-ct', className: 'rf-select' });
+  [
+    { value: 'json', label: 'JSON (application/json)' },
+    { value: 'form', label: 'Form (application/x-www-form-urlencoded)' },
+    { value: 'text', label: 'Text (text/plain)' },
+  ].forEach(({ value, label }) => {
+    const opt = el('option', { value, textContent: label });
+    if ((cfg.contentType || 'json') === value) opt.selected = true;
+    ctSel.appendChild(opt);
+  });
+  div.appendChild(_row('Content Type', ctSel));
+
+  // Operation
+  const opSel = el('select', { id: 'rf-ip-op', className: 'rf-select' });
+  [
+    { value: 'replace', label: 'Replace — set / overwrite a value' },
+    { value: 'append',  label: 'Append — add new key or text' },
+    { value: 'remove',  label: 'Remove — delete a key or substring' },
+  ].forEach(({ value, label }) => {
+    const opt = el('option', { value, textContent: label });
+    if ((cfg.operation || 'replace') === value) opt.selected = true;
+    opSel.appendChild(opt);
+  });
+  div.appendChild(_row('Operation', opSel));
+
+  // ── Dynamic fields (shown/hidden based on contentType + operation) ──
+
+  // JSON: path for replace/remove
+  const jsonPathRow = el('div', { id: 'rf-ip-jsonpath-row' });
+  jsonPathRow.appendChild(_row('JSON Path', el('input', {
+    type: 'text', id: 'rf-ip-jsonpath', className: 'rf-input',
+    placeholder: '$.version  or  $.user.role',
+    value: cfg.jsonPath || '',
+  })));
+  div.appendChild(jsonPathRow);
+
+  // JSON: key for append
+  const jsonKeyRow = el('div', { id: 'rf-ip-jsonkey-row' });
+  jsonKeyRow.appendChild(_row('New Key', el('input', {
+    type: 'text', id: 'rf-ip-key', className: 'rf-input',
+    placeholder: 'newField',
+    value: cfg.key || '',
+  })));
+  div.appendChild(jsonKeyRow);
+
+  // Form: field name (replace / append / remove)
+  const formKeyRow = el('div', { id: 'rf-ip-formkey-row' });
+  formKeyRow.appendChild(_row('Field Name', el('input', {
+    type: 'text', id: 'rf-ip-formkey', className: 'rf-input',
+    placeholder: 'username',
+    value: cfg.key || '',
+  })));
+  div.appendChild(formKeyRow);
+
+  // Text: find string (replace / remove)
+  const textFindRow = el('div', { id: 'rf-ip-find-row' });
+  textFindRow.appendChild(_row('Find Text', el('input', {
+    type: 'text', id: 'rf-ip-find', className: 'rf-input',
+    placeholder: 'old string',
+    value: cfg.find || '',
+  })));
+  div.appendChild(textFindRow);
+
+  // Value field (replace + append) — used for JSON value, form value, and text replace/append
+  const valueRow = el('div', { id: 'rf-ip-value-row' });
+  const valueLabel = el('label', { className: 'rf-label', id: 'rf-ip-value-label', textContent: 'New Value' });
+  const valueHint  = el('span', { id: 'rf-ip-value-hint', style: 'font-size:10px;color:var(--c-subtle);margin-left:6px' });
+  const valueIn    = el('input', {
+    type: 'text', id: 'rf-ip-value', className: 'rf-input',
+    value: cfg.value || '',
+  });
+  const labelRow = el('div', { style: 'display:flex;align-items:center;margin-bottom:4px' });
+  labelRow.appendChild(valueLabel);
+  labelRow.appendChild(valueHint);
+  valueRow.appendChild(labelRow);
+  valueRow.appendChild(valueIn);
+  div.appendChild(valueRow);
+
+  // Hint line
+  const hintEl = el('div', { id: 'rf-ip-hint', style: 'font-size:11px;color:var(--c-subtle);margin-top:4px' });
+  div.appendChild(hintEl);
+
+  // Update visible fields based on contentType + operation
+  function updateFields() {
+    const ct = ctSel.value;
+    const op = opSel.value;
+
+    jsonPathRow.style.display = (ct === 'json' && (op === 'replace' || op === 'remove')) ? '' : 'none';
+    jsonKeyRow.style.display  = (ct === 'json' && op === 'append') ? '' : 'none';
+    formKeyRow.style.display  = (ct === 'form') ? '' : 'none';
+    textFindRow.style.display = (ct === 'text' && (op === 'replace' || op === 'remove')) ? '' : 'none';
+    valueRow.style.display    = (op !== 'remove') ? '' : 'none';
+
+    // Update value label + hint
+    if (ct === 'json') {
+      valueLabel.textContent = op === 'append' ? 'Value (JSON literal)' : 'New Value (JSON literal)';
+      valueHint.textContent  = '— strings need quotes: "v4"  numbers: 42  bool: true';
+      valueIn.placeholder    = op === 'append' ? '"newValue"' : '"v4"';
+    } else if (ct === 'form') {
+      valueLabel.textContent = 'Field Value';
+      valueHint.textContent  = '';
+      valueIn.placeholder    = 'fieldValue';
+    } else {
+      valueLabel.textContent = op === 'append' ? 'Text to Append' : 'Replace With';
+      valueHint.textContent  = '';
+      valueIn.placeholder    = op === 'append' ? 'appended text' : 'new string';
+    }
+
+    // Hint
+    if (ct === 'json' && op === 'replace') hintEl.textContent = 'Sets the value at the given JSON path. Nested paths are created if missing.';
+    else if (ct === 'json' && op === 'append') hintEl.textContent = 'Adds a new key to the root JSON object.';
+    else if (ct === 'json' && op === 'remove') hintEl.textContent = 'Removes the key at the given JSON path.';
+    else if (ct === 'form' && op === 'replace') hintEl.textContent = 'Updates the field if it exists, adds it if not.';
+    else if (ct === 'form' && op === 'append') hintEl.textContent = 'Adds a duplicate field entry (multiple values).';
+    else if (ct === 'form' && op === 'remove') hintEl.textContent = 'Removes all entries for the given field name.';
+    else if (ct === 'text' && op === 'replace') hintEl.textContent = 'Replaces ALL occurrences of the found text.';
+    else if (ct === 'text' && op === 'append') hintEl.textContent = 'Appends text to the end of the body.';
+    else if (ct === 'text' && op === 'remove') hintEl.textContent = 'Removes ALL occurrences of the found text.';
+    else hintEl.textContent = '';
+  }
+
+  ctSel.addEventListener('change', updateFields);
+  opSel.addEventListener('change', updateFields);
+  requestAnimationFrame(updateFields);
+
+  return div;
+}
+
 /* ----- Footer ----- */
 
 function _buildFooter() {
@@ -819,17 +1105,21 @@ function _collectRule() {
   };
 
   rule.action.type = _val('rf-action-type');
-  rule.action.redirect.targetHost = _val('rf-redirect-host');
-  rule.action.redirect.preservePath = _checked('rf-redirect-preserve');
+  rule.action.redirect.targetHost        = _val('rf-redirect-host');
+  rule.action.redirect.preservePath      = _checked('rf-redirect-preserve');
   rule.action.redirect.additionalHeaders = _collectKvAsArray('rf-redirect-headers-list');
-  rule.action.rewrite.pattern = _val('rf-rewrite-pattern');
-  rule.action.rewrite.replacement = _val('rf-rewrite-replacement');
+  rule.action.redirect.injectPayload     = _collectPayloadSection('redir');
+
+  rule.action.rewrite.pattern        = _val('rf-rewrite-pattern');
+  rule.action.rewrite.replacement    = _val('rf-rewrite-replacement');
+  rule.action.rewrite.injectPayload  = _collectPayloadSection('rw');
   rule.action.mockInline.statusCode = parseInt(_val('rf-mock-status'), 10) || 200;
   rule.action.mockInline.headers = _collectKvAsObject('rf-mock-headers-list');
   rule.action.mockInline.body = _val('rf-mock-body') || '{}';
-  rule.action.mockServer.serverUrl = _val('rf-ms-url') || 'http://localhost:5000/proxy';
-  rule.action.mockServer.mode = _val('rf-ms-mode') || MOCK_SERVER_MODES.RESPONSE_ONLY;
-  rule.action.mockServer.stepTag = _val('rf-ms-tag');
+  rule.action.mockServer.serverUrl      = _val('rf-ms-url') || 'http://localhost:5000/proxy';
+  rule.action.mockServer.mode           = _val('rf-ms-mode') || MOCK_SERVER_MODES.RESPONSE_ONLY;
+  rule.action.mockServer.stepTag        = _val('rf-ms-tag');
+  rule.action.mockServer.injectPayload  = _collectPayloadSection('ms');
   rule.action.headerMods.addRequest = _collectKvAsArray('rf-hm-add-req');
   rule.action.headerMods.removeRequest = _collectKvAsArray('rf-hm-remove-req');
   rule.action.headerMods.addResponse = _collectKvAsArray('rf-hm-add-res');
@@ -869,6 +1159,15 @@ function _collectRule() {
   };
   rule.action.injectCss = {
     code: _val('rf-inject-css') || '',
+  };
+
+  rule.action.injectPayload = {
+    contentType: _val('rf-ip-ct')       || 'json',
+    operation:   _val('rf-ip-op')       || 'replace',
+    jsonPath:    _val('rf-ip-jsonpath') || '',
+    key:         _val('rf-ip-key')      || _val('rf-ip-formkey') || '',
+    value:       _val('rf-ip-value')    || '',
+    find:        _val('rf-ip-find')     || '',
   };
 
   return rule;

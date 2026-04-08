@@ -80,8 +80,9 @@ const ACTION_BADGE_MAP = {
   modify_body:    { cls: 'rl-badge-purple',  label: 'MOD BODY' },
   set_user_agent: { cls: 'rl-badge-cyan',    label: 'USER-AGENT' },
   graphql_mock:   { cls: 'rl-badge-purple',  label: 'GRAPHQL' },
-  inject_script:  { cls: 'rl-badge-yellow',  label: 'INJECT JS' },
-  inject_css:     { cls: 'rl-badge-cyan',    label: 'INJECT CSS' },
+  inject_script:   { cls: 'rl-badge-yellow',  label: 'INJECT JS' },
+  inject_css:      { cls: 'rl-badge-cyan',    label: 'INJECT CSS' },
+  inject_payload:  { cls: 'rl-badge-orange',  label: 'INJECT BODY' },
 };
 
 /* -------------------------------------------------------------------------- */
